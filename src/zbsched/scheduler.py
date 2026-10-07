@@ -533,10 +533,11 @@ class Scheduler:
                 await asyncio.wait_for(stop.wait(), timeout=self.sleep_seconds())
 
     def status(self) -> dict[str, Any]:
+        """Counters for /healthz (no ids: the endpoint is unauthenticated)."""
         return {
-            "queue": [j.short_id for j in self.queue],
-            "running": {sid: r.task_id for sid, r in self.running.items()},
-            "cooldown": sorted(self.cooldowns),
+            "queued": len(self.queue),
+            "running": len(self.running),
+            "cooldown": len(self.cooldowns),
             "max_concurrent": self.settings.max_concurrent,
             "api_ok": self.api_ok,
             "last_tick": self.last_tick,
