@@ -360,3 +360,16 @@ async def test_sleep_until_next_fire(make):
     assert s.sleep_seconds() == pytest.approx(20.0)  # poll interval < 30 s to 03:00
     s.next_fires["a"] = datetime.fromtimestamp(T0 + 5, PARIS)
     assert s.sleep_seconds() == pytest.approx(5.0)
+
+
+async def test_due_job_starts_in_the_same_tick_with_a_moving_clock(make):
+    s, fake, clock = make([sched("a")])
+    await s.bootstrap()
+
+    def ticking():
+        clock.now += 0.001  # real clocks move between two reads
+        return clock.now
+
+    s.clock = ticking
+    await fire(s, clock)
+    assert fake.run_calls == ["a"]

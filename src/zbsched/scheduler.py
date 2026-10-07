@@ -140,7 +140,9 @@ class Scheduler:
             )
             return False
         now = self.clock()
-        self.queue.append(Job(short_id, reason, attempt, now + delay, now))
+        # not_before=0 means "ready now": comparing against a timestamp taken a few
+        # microseconds later in the same tick would otherwise delay it a whole tick.
+        self.queue.append(Job(short_id, reason, attempt, now + delay if delay else 0.0, now))
         log_event(
             INFO,
             "queued",
