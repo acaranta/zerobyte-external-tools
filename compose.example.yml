@@ -1,0 +1,45 @@
+# Example deployment next to zerobyte (adapt names, paths and network).
+# The API key is read from a file so it never appears in `docker inspect`.
+services:
+  zerobyte-scheduler:
+    image: zerobyte-external-scheduler:latest
+    build: .
+    restart: unless-stopped
+    environment:
+      ZEROBYTE_URL: http://zerobyte:4096
+      ZEROBYTE_API_KEY_FILE: /run/secrets/zerobyte_api_key
+      MAX_CONCURRENT: "1"
+      POLL_INTERVAL_SECONDS: "20"
+      COOLDOWN_SECONDS: "60"
+      TASK_TIMEOUT_HOURS: "12"
+      # zerobyte (default) = import cron expressions from zerobyte, file = only schedules.yml
+      SCHEDULE_SOURCE: zerobyte
+      SCHEDULES_FILE: /config/schedules.yml
+      # Must be the same time zone zerobyte runs in.
+      TZ: Europe/Paris
+      LOG_LEVEL: INFO
+    secrets:
+      - zerobyte_api_key
+    volumes:
+      # Optional with SCHEDULE_SOURCE=zerobyte (overrides / exclusions only).
+      - ./schedules.yml:/config/schedules.yml:ro
+    networks:
+      - infratools
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 128m
+    logging:
+      driver: syslog
+      options:
+        tag: "{{.Name}}"
+
+secrets:
+  zerobyte_api_key:
+    file: ./secrets/zerobyte_api_key
+
+networks:
+  infratools:
+    external: true

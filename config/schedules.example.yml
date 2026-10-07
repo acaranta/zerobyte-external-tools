@@ -1,0 +1,17 @@
+# Schedules file for zerobyte-external-scheduler.
+#
+# SCHEDULE_SOURCE=zerobyte (default): every zerobyte schedule is run on its own
+#   cronExpression; this file is optional and only overrides or excludes entries.
+# SCHEDULE_SOURCE=file: only the schedules listed here are run, each needs `cron`.
+#
+# Refer to a schedule by `id` (its shortId, visible in the zerobyte URL) or by its
+# exact `name`. Cron: 5 fields, or 6 with seconds FIRST (same as zerobyte).
+schedules:
+  - id: abc123
+    cron: "0 3 * * *"       # run at 03:00 instead of zerobyte's own expression
+
+  - name: "Photos"
+    cron: "30 1 * * *"
+
+  - id: def456
+    enabled: false          # never run this one from the scheduler
