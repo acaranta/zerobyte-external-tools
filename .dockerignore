@@ -4,4 +4,5 @@
 .ruff_cache
 **/__pycache__
 tests
-secrets
+.env
+.drone.yml

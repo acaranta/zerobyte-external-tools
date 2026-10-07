@@ -1,13 +1,13 @@
 # Example deployment next to zerobyte (adapt names, paths and network).
-# The API key is read from a file so it never appears in `docker inspect`.
+# The image is built by CI and pushed to the in-house registry.
 services:
   zerobyte-scheduler:
-    image: zerobyte-external-scheduler:latest
-    build: .
+    image: registry.example.com/infra/zerobyte-external-scheduler:latest
     restart: unless-stopped
     environment:
       ZEROBYTE_URL: http://zerobyte:4096
-      ZEROBYTE_API_KEY_FILE: /run/secrets/zerobyte_api_key
+      # Taken from the shell or a .env file next to this compose file.
+      ZEROBYTE_API_KEY: ${ZEROBYTE_API_KEY:?set ZEROBYTE_API_KEY}
       MAX_CONCURRENT: "1"
       POLL_INTERVAL_SECONDS: "20"
       COOLDOWN_SECONDS: "60"
@@ -18,8 +18,6 @@ services:
       # Must be the same time zone zerobyte runs in.
       TZ: Europe/Paris
       LOG_LEVEL: INFO
-    secrets:
-      - zerobyte_api_key
     volumes:
       # Optional with SCHEDULE_SOURCE=zerobyte (overrides / exclusions only).
       - ./schedules.yml:/config/schedules.yml:ro
@@ -35,10 +33,6 @@ services:
       driver: syslog
       options:
         tag: "{{.Name}}"
-
-secrets:
-  zerobyte_api_key:
-    file: ./secrets/zerobyte_api_key
 
 networks:
   infratools:

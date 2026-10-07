@@ -53,7 +53,7 @@ All configuration is through environment variables.
 |---|---|---|
 | `ZEROBYTE_URL` | *required* | e.g. `http://zerobyte:4096` (same Docker network) or `https://backup.example.com` |
 | `ZEROBYTE_API_KEY` | | API key (zerobyte UI: *Settings → API keys*) |
-| `ZEROBYTE_API_KEY_FILE` | | file holding the key (Docker secret); use instead of `ZEROBYTE_API_KEY` |
+| `ZEROBYTE_API_KEY_FILE` | | alternative: file holding the key (e.g. a mounted Docker secret) |
 | `MAX_CONCURRENT` | `1` | maximum heavy tasks running at once |
 | `POLL_INTERVAL_SECONDS` | `20` | how often tasks are polled (zerobyte rate limit: 1000 requests / 5 min) |
 | `COOLDOWN_SECONDS` | `60` | how long a slot stays held after a backup and its forget finish |
@@ -123,13 +123,18 @@ because zerobyte would run it as well, which defeats the purpose.
 
 ### Docker Compose
 
-See [compose.example.yml](compose.example.yml):
+See [compose.example.yml](compose.example.yml). It pulls the image built by CI and
+reads the API key from the `ZEROBYTE_API_KEY` environment variable (shell or `.env`):
 
 ```sh
-mkdir -p secrets && printf '%s' 'zb_xxx' > secrets/zerobyte_api_key && chmod 600 secrets/zerobyte_api_key
+echo 'ZEROBYTE_API_KEY=zb_xxx' > .env && chmod 600 .env
 cp config/schedules.example.yml schedules.yml   # optional with SCHEDULE_SOURCE=zerobyte
-docker compose -f compose.example.yml up -d --build
+docker compose -f compose.example.yml up -d
 ```
+
+### Image build
+
+To build the image locally: `docker build -t zerobyte-external-scheduler .`
 
 The image runs as a non-root user (uid 10001), works with a read-only root filesystem,
 and has a `HEALTHCHECK` on `/healthz`.
