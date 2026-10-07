@@ -11,7 +11,15 @@ FINISHED_STATUSES = frozenset({"succeeded", "failed", "cancelled", "stale"})
 
 
 class ZerobyteError(Exception):
-    """Any unexpected answer from zerobyte (bad status, bad JSON, network error)."""
+    """Any unexpected answer from zerobyte (bad status, bad JSON, network error).
+
+    ``status`` is the HTTP status code, or None when no HTTP answer was received
+    (connection refused, timeout...), which callers treat as a transient failure.
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class AuthError(ZerobyteError):
@@ -71,15 +79,17 @@ class ZerobyteClient:
         if response.status_code in (401, 403):
             raise AuthError(
                 f"{method} {path}: HTTP {response.status_code} {_message(response)}"
-                " (check ZEROBYTE_API_KEY)"
+                " (check ZEROBYTE_API_KEY)",
+                response.status_code,
             )
         if response.status_code == 404:
-            raise NotFound(f"{method} {path}: HTTP 404 {_message(response)}")
+            raise NotFound(f"{method} {path}: HTTP 404 {_message(response)}", 404)
         if response.status_code == 409:
-            raise AlreadyRunning(f"{method} {path}: HTTP 409 {_message(response)}")
+            raise AlreadyRunning(f"{method} {path}: HTTP 409 {_message(response)}", 409)
         if response.status_code >= 400:
             raise ZerobyteError(
-                f"{method} {path}: HTTP {response.status_code} {_message(response)}"
+                f"{method} {path}: HTTP {response.status_code} {_message(response)}",
+                response.status_code,
             )
         return response
 

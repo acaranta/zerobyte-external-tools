@@ -1,0 +1,126 @@
+"""In-memory zerobyte stand-in for engine tests."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from zbsched.client import AlreadyRunning, NotFound, ZerobyteError
+
+
+class Clock:
+    def __init__(self, start: float) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+class FakeZerobyte:
+    """Implements the ZerobyteClient methods the scheduler uses."""
+
+    def __init__(self, clock: Clock, schedules: list[dict[str, Any]]) -> None:
+        self.clock = clock
+        self.schedules = schedules
+        self.tasks: dict[str, dict[str, Any]] = {}
+        self.run_calls: list[str] = []
+        self.cancelled: list[str] = []
+        self.run_errors: dict[str, Exception] = {}
+        self.down = False
+        self.forget_after_backup = False
+        self._n = 0
+
+    # -- helpers for tests
+    def _new_task(self, kind: str, short_id: str | None, manual: bool = True) -> dict[str, Any]:
+        self._n += 1
+        ms = int(self.clock() * 1000)
+        task = {
+            "id": f"t{self._n}",
+            "kind": kind,
+            "status": "running",
+            "resourceType": "backup_schedule" if short_id else "repository",
+            "resourceId": short_id or "repo1",
+            "input": {"manual": manual},
+            "error": None,
+            "createdAt": ms,
+            "startedAt": ms,
+            "finishedAt": None,
+        }
+        self.tasks[task["id"]] = task
+        return task
+
+    def external_task(self, kind: str, short_id: str | None) -> str:
+        return self._new_task(kind, short_id)["id"]
+
+    def finish(self, task_id: str, status: str = "succeeded", error: str | None = None) -> None:
+        task = self.tasks[task_id]
+        task.update(status=status, error=error, finishedAt=int(self.clock() * 1000))
+        if status == "succeeded" and task["kind"] == "backup" and self.forget_after_backup:
+            self._new_task("forget", task["resourceId"])
+
+    def active_ids(self, kind: str | None = None) -> list[str]:
+        return [
+            t["id"]
+            for t in self.tasks.values()
+            if t["status"] in ("queued", "running", "cancelling")
+            and (kind is None or t["kind"] == kind)
+        ]
+
+    def heavy_active(self) -> int:
+        return len(
+            {
+                t["resourceId"]
+                for t in self.tasks.values()
+                if t["status"] in ("queued", "running") and t["kind"] in ("backup", "forget")
+            }
+        )
+
+    def _check(self) -> None:
+        if self.down:
+            raise ZerobyteError("GET: ConnectError: refused")
+
+    # -- client API
+    async def healthcheck(self) -> None:
+        self._check()
+
+    async def list_schedules(self) -> list[dict[str, Any]]:
+        self._check()
+        return [dict(s) for s in self.schedules]
+
+    async def run_backup(self, short_id: str) -> str:
+        self._check()
+        self.run_calls.append(short_id)
+        if short_id in self.run_errors:
+            raise self.run_errors[short_id]
+        if any(
+            t["kind"] == "backup"
+            and t["resourceId"] == short_id
+            and t["status"] in ("queued", "running")
+            for t in self.tasks.values()
+        ):
+            raise AlreadyRunning("HTTP 409 Backup is already running for this schedule", 409)
+        return self._new_task("backup", short_id)["id"]
+
+    async def get_task(self, task_id: str) -> dict[str, Any]:
+        self._check()
+        if task_id not in self.tasks:
+            raise NotFound("HTTP 404 Task not found", 404)
+        return dict(self.tasks[task_id])
+
+    async def list_active_tasks(
+        self, *, kind: str | None = None, schedule_short_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        self._check()
+        return [
+            dict(t)
+            for t in self.tasks.values()
+            if t["status"] in ("queued", "running", "cancelling")
+            and (kind is None or t["kind"] == kind)
+            and (schedule_short_id is None or t["resourceId"] == schedule_short_id)
+        ]
+
+    async def cancel_task(self, task_id: str) -> None:
+        self.cancelled.append(task_id)
+        self.tasks[task_id]["status"] = "cancelling"
