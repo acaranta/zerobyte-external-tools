@@ -33,6 +33,7 @@ class Settings:
     retry_count: int = 0
     retry_delay: float = 600.0
     health_port: int = 8080
+    health_bind: str = "127.0.0.1"
     tz: str = "Europe/Paris"
     log_level: str = "INFO"
 
@@ -150,6 +151,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         retry_count=_int(env, "RETRY_COUNT", 0, minimum=0),
         retry_delay=_float(env, "RETRY_DELAY_SECONDS", 600.0, minimum=0.0),
         health_port=_int(env, "HEALTH_PORT", 8080, minimum=0),
+        health_bind=_get(env, "HEALTH_BIND") or "127.0.0.1",
         tz=tz,
         log_level=log_level,
     )

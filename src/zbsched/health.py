@@ -1,7 +1,8 @@
 """Tiny HTTP server exposing GET /healthz.
 
 The endpoint is unauthenticated, so it only returns counters (no schedule or task ids),
-and every connection is bounded in time, header count and concurrency.
+every connection is bounded in time, header count and concurrency, and it listens on
+localhost by default (enough for the Docker HEALTHCHECK, which runs inside the container).
 """
 
 from __future__ import annotations
@@ -67,13 +68,15 @@ async def _handle(
             writer.close()
 
 
-async def start_health_server(port: int, status: StatusFn) -> asyncio.Server:
+async def start_health_server(
+    port: int, status: StatusFn, host: str = "127.0.0.1"
+) -> asyncio.Server:
     slots = asyncio.Semaphore(MAX_CONNECTIONS)
     server = await asyncio.start_server(
         lambda r, w: _handle(r, w, status, slots),
-        host="0.0.0.0",
+        host=host,
         port=port,
         limit=MAX_LINE_BYTES * 2,
     )
-    log_event(20, "healthz_listening", port=port)
+    log_event(20, "healthz_listening", host=host, port=port)
     return server

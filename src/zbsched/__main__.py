@@ -138,7 +138,7 @@ async def amain(settings: Settings, args: argparse.Namespace) -> int:
                 )
                 return fresh and scheduler.api_ok, scheduler.status()
 
-            server = await start_health_server(settings.health_port, health)
+            server = await start_health_server(settings.health_port, health, settings.health_bind)
 
         log_event(
             logging.INFO,

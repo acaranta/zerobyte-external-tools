@@ -22,6 +22,7 @@ def test_defaults():
     assert s.catch_up is True
     assert s.retry_count == 0
     assert s.health_port == 8080
+    assert s.health_bind == "127.0.0.1"
     assert s.tz == "Europe/Paris"
     assert s.log_level == "INFO"
 
