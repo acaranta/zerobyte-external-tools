@@ -44,3 +44,10 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["zbsched", "fakes", "fake_server"]
+
+# Always resolve and lock against public PyPI, whatever index the machine's own uv
+# config points to, so uv.lock stays portable (CI, other hosts, contributors).
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
