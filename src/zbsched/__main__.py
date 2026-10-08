@@ -22,6 +22,7 @@ from .health import start_health_server
 from .logs import log_event, setup_logging
 from .scheduler import Scheduler
 from .schedules import ScheduleError
+from .state import StateStore
 
 EXIT_OK, EXIT_FAILED, EXIT_CONFIG = 0, 1, 2
 
@@ -96,7 +97,10 @@ def print_table(scheduler: Scheduler) -> None:
 
 async def amain(settings: Settings, args: argparse.Namespace) -> int:
     async with ZerobyteClient(settings.zerobyte_url, settings.api_key) as client:
-        scheduler = Scheduler(settings, client, once=bool(args.once or args.check))
+        once = bool(args.once or args.check)
+        # --once and --check never read or write the state file.
+        store = StateStore(settings.state_file) if settings.state_file and not once else None
+        scheduler = Scheduler(settings, client, once=once, store=store)
         try:
             await scheduler.bootstrap()
             targets = resolve_once_targets(scheduler, args.once) if args.once else []
@@ -148,6 +152,7 @@ async def amain(settings: Settings, args: argparse.Namespace) -> int:
             cooldown=f"{settings.cooldown:.0f}s",
             poll=f"{settings.poll_interval:.0f}s",
             tz=settings.tz,
+            state_file=settings.state_file,
         )
         try:
             await scheduler.run(stop)
@@ -158,10 +163,11 @@ async def amain(settings: Settings, args: argparse.Namespace) -> int:
                 log_event(
                     logging.WARNING,
                     "shutdown_inflight",
-                    "left running in zerobyte; will be adopted on restart",
+                    "left running in zerobyte; will be resumed on restart",
                     schedule=sid,
                     task=run.task_id,
                 )
+            scheduler.save_state()
             log_event(logging.INFO, "scheduler_stopped", queued=len(scheduler.queue))
         return EXIT_OK
 

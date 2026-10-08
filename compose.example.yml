@@ -18,9 +18,13 @@ services:
       # Must be the same time zone zerobyte runs in.
       TZ: Europe/Paris
       LOG_LEVEL: INFO
+      # Queue, running backups and cool-downs survive restarts and upgrades.
+      STATE_FILE: /state/state.json
     volumes:
       # Optional with SCHEDULE_SOURCE=zerobyte (overrides / exclusions only).
       - ./schedules.yml:/config/schedules.yml:ro
+      # Writable even with read_only: true; owned by uid 10001 in the image.
+      - scheduler-state:/state
     networks:
       - infratools
     read_only: true
@@ -33,6 +37,9 @@ services:
       driver: syslog
       options:
         tag: "{{.Name}}"
+
+volumes:
+  scheduler-state:
 
 networks:
   infratools:

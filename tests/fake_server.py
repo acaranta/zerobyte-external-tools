@@ -116,6 +116,31 @@ def make_handler(state: FakeState):
                         and ("resourceId" not in q or t["resourceId"] == q["resourceId"])
                     ]
                     return self._send(200, active)
+                if method == "GET" and path == "/api/v1/tasks/history":
+                    q = {k: v[0] for k, v in parse_qs(url.query).items()}
+                    page = int(q.get("page", "1"))
+                    tasks = sorted(
+                        (t for t in state.tasks.values() if q.get("kind") in (None, t["kind"])),
+                        key=lambda t: t["createdAt"],
+                        reverse=True,
+                    )
+                    items = [
+                        {
+                            "id": t["id"],
+                            "kind": t["kind"],
+                            "status": t["status"],
+                            "target": {
+                                "kind": "backupSchedule",
+                                "scheduleShortId": t["resourceId"],
+                            },
+                            "createdAt": t["createdAt"],
+                            "startedAt": t["startedAt"],
+                            "finishedAt": t["finishedAt"],
+                        }
+                        for t in tasks[(page - 1) * 25 : page * 25]
+                    ]
+                    total = -(-len(tasks) // 25)
+                    return self._send(200, {"items": items, "page": page, "totalPages": total})
                 if method == "GET" and len(parts) == 4 and parts[2] == "tasks":
                     task = state.tasks.get(parts[3])
                     if task is None:

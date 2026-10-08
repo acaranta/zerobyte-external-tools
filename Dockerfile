@@ -31,7 +31,11 @@ ENV PATH=/app/.venv/bin:$PATH \
 COPY --from=build /app/.venv /app/.venv
 
 RUN groupadd --system --gid 10001 zbsched \
-    && useradd --system --uid 10001 --gid zbsched --no-create-home --shell /usr/sbin/nologin zbsched
+    && useradd --system --uid 10001 --gid zbsched --no-create-home --shell /usr/sbin/nologin zbsched \
+    && install -d -o 10001 -g 10001 -m 0750 /state
+
+# Optional STATE_FILE location: a named volume mounted here inherits this ownership.
+VOLUME ["/state"]
 
 USER 10001:10001
 WORKDIR /app

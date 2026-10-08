@@ -14,6 +14,12 @@ shortId when the task belongs to a backup schedule (so a backup followed by its 
   schedule any more) so the background ``restic stats`` can finish.
 
 A new backup starts only while ``len(busy units) < MAX_CONCURRENT``.
+
+Restarts
+--------
+With ``STATE_FILE`` set, the queue, the backups being watched, the cool-downs, the
+abandoned task ids and the counters are saved after every change and reconciled
+against zerobyte at startup (see ``reconcile``). zerobyte wins every disagreement.
 """
 
 from __future__ import annotations
@@ -24,7 +30,7 @@ import logging
 import time
 from collections import deque
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -46,8 +52,10 @@ from .schedules import (
     load_overrides,
     next_fire,
 )
+from .state import SavedState, StateStore
 
 INFO, WARNING, ERROR = logging.INFO, logging.WARNING, logging.ERROR
+HISTORY_MAX_PAGES = 4  # task history pages (25 tasks each) read per kind at startup
 
 
 @dataclass
@@ -91,6 +99,7 @@ class Scheduler:
     client: ZerobyteClient
     clock: Callable[[], float] = time.time
     once: bool = False
+    store: StateStore | None = None
 
     table: dict[str, ScheduleEntry] = field(default_factory=dict)
     next_fires: dict[str, datetime] = field(default_factory=dict)
@@ -257,8 +266,20 @@ class Scheduler:
                 next_run=self.next_fires[sid].isoformat(),
             )
         log_event(INFO, "schedules_loaded", count=len(self.table))
+        saved = self.store.load() if self.store else SavedState()
+        await self.reconcile(saved)
+        self.save_state()
 
+    async def reconcile(self, saved: SavedState) -> None:
+        """Rebuild the state at startup from the saved state and the zerobyte API.
+
+        zerobyte wins: a saved backup that is no longer active is reported as finished,
+        a saved job whose schedule is gone or already running is dropped, and backups
+        running in zerobyte that we did not know about are adopted.
+        """
+        now = self.clock()
         active = await self.client.list_active_tasks()
+        active_by_id = {str(t.get("id")): t for t in active}
         for task in active:
             if task.get("kind") in self.settings.heavy_task_kinds:
                 log_event(
@@ -269,11 +290,134 @@ class Scheduler:
                     status=task.get("status"),
                     resource=task.get("resourceId"),
                 )
-            if task.get("kind") == "backup" and task.get("resourceType") == "backup_schedule":
+
+        for name, value in saved.stats.items():
+            setattr(self.stats, name, value)
+        # Tasks given up on before the restart stay given up on while they run.
+        self.abandoned = {tid for tid in saved.abandoned if tid in active_by_id}
+        self._restore_queue(saved)
+
+        for entry in saved.running:
+            await self._resume(Running(**entry), active_by_id, now)
+        for task in active:
+            if (
+                task.get("kind") == "backup"
+                and task.get("resourceType") == "backup_schedule"
+                and str(task.get("resourceId")) not in self.running
+                and str(task.get("id")) not in self.abandoned
+            ):
                 self._adopt(task, reason="adopted")
+        for job in [j for j in self.queue if j.short_id in self.running]:
+            self.queue.remove(job)
+            log_event(WARNING, "queue_dropped", schedule=job.short_id, reason="running")
+
+        if self.settings.cooldown > 0:
+            self._restore_cooldowns(saved, active, now)
+            await self._cooldowns_from_history(now)
 
         if self.settings.catch_up and not self.once:
             self._catch_up()
+        log_event(
+            INFO,
+            "state_reconciled",
+            queued=len(self.queue),
+            running=len(self.running),
+            cooldown=len(self.cooldowns),
+        )
+
+    def _restore_queue(self, saved: SavedState) -> None:
+        for entry in saved.queue:
+            job = Job(**entry)
+            if job.short_id not in self.table:
+                log_event(
+                    WARNING, "queue_dropped", schedule=job.short_id, reason="schedule_removed"
+                )
+            elif self.is_queued(job.short_id):
+                log_event(WARNING, "queue_dropped", schedule=job.short_id, reason="duplicate")
+            else:
+                self.queue.append(job)
+                log_event(
+                    INFO,
+                    "queue_restored",
+                    schedule=job.short_id,
+                    name=self._name(job.short_id),
+                    trigger=job.reason,
+                    attempt=job.attempt if job.attempt > 1 else None,
+                    position=len(self.queue),
+                )
+
+    async def _resume(self, run: Running, active_by_id: dict[str, Any], now: float) -> None:
+        """Watch a saved backup again, or report how it ended while we were down."""
+        task: dict[str, Any] | None = active_by_id.get(run.task_id)
+        if task is None:
+            try:
+                task = await self.client.get_task(run.task_id)
+            except NotFound:
+                task = None
+        if task is not None and task.get("status") in ACTIVE_STATUSES:
+            # Keep the saved start time: the timeout counts from the real start.
+            self.running[run.short_id] = run
+            log_event(
+                INFO,
+                "resumed",
+                schedule=run.short_id,
+                name=self._name(run.short_id),
+                task=run.task_id,
+                status=task.get("status"),
+                trigger=run.reason,
+            )
+            return
+        self.running[run.short_id] = run
+        self._finish(run, task, now, recovered=True)
+
+    def _restore_cooldowns(
+        self, saved: SavedState, active: list[dict[str, Any]], now: float
+    ) -> None:
+        for unit, until in saved.cooldowns.items():
+            self._set_cooldown(unit, until, now, source="state")
+        # A heavy task still active for a schedule (typically the forget that follows a
+        # backup) gets a cool-down too: it is extended until that task ends.
+        for task in active:
+            if task.get("kind") in self.settings.heavy_task_kinds:
+                self._set_cooldown(_unit(task), now + self.settings.cooldown, now, source="active")
+
+    async def _cooldowns_from_history(self, now: float) -> None:
+        """Cool down the schedules whose heavy task finished less than COOLDOWN ago."""
+        # Older tasks cannot have finished recently enough: they would have timed out.
+        oldest = now - self.settings.task_timeout - self.settings.cooldown
+        for kind in sorted(self.settings.heavy_task_kinds):
+            for page in range(1, HISTORY_MAX_PAGES + 1):
+                try:
+                    body = await self.client.list_task_history(kind=kind, page=page)
+                except ZerobyteError as exc:
+                    log_event(WARNING, "api_error", str(exc), action="task_history", kind=kind)
+                    break
+                items = body["items"]
+                for item in items:
+                    finished = _ms_to_s(item.get("finishedAt"))
+                    if item.get("status") in ACTIVE_STATUSES or finished is None:
+                        continue
+                    target = item.get("target") or {}
+                    if target.get("kind") == "backupSchedule" and target.get("scheduleShortId"):
+                        unit = str(target["scheduleShortId"])
+                    else:
+                        unit = f"task:{item.get('id')}"
+                    self._set_cooldown(unit, finished + self.settings.cooldown, now, "history")
+                created = [_ms_to_s(i.get("createdAt")) or 0.0 for i in items]
+                if not items or min(created) < oldest or page >= int(body.get("totalPages", 0)):
+                    break
+
+    def _set_cooldown(self, unit: str, until: float, now: float, source: str) -> None:
+        if until <= now or unit in self.running or until <= self.cooldowns.get(unit, 0.0):
+            return
+        self.cooldowns[unit] = until
+        log_event(
+            INFO,
+            "cooldown_restored",
+            schedule=unit,
+            until=self._now_dt(until).isoformat(),
+            source=source,
+        )
 
     def _adopt(self, task: dict[str, Any], *, reason: str) -> None:
         sid = str(task["resourceId"])
@@ -357,7 +501,9 @@ class Scheduler:
                 continue  # listed a moment ago as finished, but still active: next tick
             self._finish(run, task, now)
 
-    def _finish(self, run: Running, task: dict[str, Any] | None, now: float) -> None:
+    def _finish(
+        self, run: Running, task: dict[str, Any] | None, now: float, *, recovered: bool = False
+    ) -> None:
         del self.running[run.short_id]
         status = "unknown" if task is None else str(task.get("status"))
         started = (task and _ms_to_s(task.get("startedAt"))) or run.started_at
@@ -374,6 +520,7 @@ class Scheduler:
             status=status,
             duration=f"{max(0.0, finished - started):.0f}s",
             attempt=run.attempt if run.attempt > 1 else None,
+            recovered=True if recovered else None,
         )
         if run.reason != "adopted":
             if status == "succeeded":
@@ -381,7 +528,10 @@ class Scheduler:
             else:
                 self.stats.failed += 1
         if self.settings.cooldown > 0:
-            self.cooldowns[run.short_id] = now + self.settings.cooldown
+            # A task that ended while we were down cools down from its real end.
+            until = (finished if recovered else now) + self.settings.cooldown
+            if until > now:
+                self.cooldowns[run.short_id] = until
         if status == "failed":
             self._maybe_retry(run.short_id, run.attempt)
 
@@ -531,8 +681,23 @@ class Scheduler:
                 return
             if not self.once and self.clock() - self.last_refresh >= self.settings.schedule_refresh:
                 await self.refresh()
+            self.save_state()
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=self.sleep_seconds())
+
+    def snapshot(self) -> SavedState:
+        return SavedState(
+            queue=[asdict(job) for job in self.queue],
+            running=[asdict(run) for run in self.running.values()],
+            cooldowns=dict(self.cooldowns),
+            abandoned=sorted(self.abandoned),
+            stats=asdict(self.stats),
+        )
+
+    def save_state(self) -> None:
+        """Write the state file if there is one and the state changed."""
+        if self.store is not None:
+            self.store.save(self.snapshot(), self.clock())
 
     def status(self) -> dict[str, Any]:
         """Counters for /healthz (no ids: the endpoint is unauthenticated)."""
@@ -542,6 +707,7 @@ class Scheduler:
             "cooldown": len(self.cooldowns),
             "max_concurrent": self.settings.max_concurrent,
             "api_ok": self.api_ok,
+            "state_ok": None if self.store is None else self.store.ok,
             "last_tick": self.last_tick,
             "stats": vars(self.stats),
         }

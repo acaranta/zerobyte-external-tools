@@ -30,6 +30,8 @@ class FakeZerobyte:
         self.run_errors: dict[str, Exception] = {}
         self.down = False
         self.forget_after_backup = False
+        self.history_calls: list[tuple[str, int]] = []
+        self.history_error: Exception | None = None
         self._n = 0
 
     # -- helpers for tests
@@ -120,6 +122,35 @@ class FakeZerobyte:
             and (kind is None or t["kind"] == kind)
             and (schedule_short_id is None or t["resourceId"] == schedule_short_id)
         ]
+
+    async def list_task_history(self, *, kind: str, page: int = 1) -> dict[str, Any]:
+        """Same shape as zerobyte v0.43.1: newest created first, 25 per page."""
+        self._check()
+        self.history_calls.append((kind, page))
+        if self.history_error:
+            raise self.history_error
+        tasks = sorted(
+            (t for t in self.tasks.values() if t["kind"] == kind),
+            key=lambda t: (t["createdAt"], t["id"]),
+            reverse=True,
+        )
+        items = [
+            {
+                "id": t["id"],
+                "kind": t["kind"],
+                "status": t["status"],
+                "target": (
+                    {"kind": "backupSchedule", "scheduleShortId": t["resourceId"]}
+                    if t["resourceType"] == "backup_schedule"
+                    else {"kind": "repository", "repositoryShortId": t["resourceId"]}
+                ),
+                "createdAt": t["createdAt"],
+                "startedAt": t["startedAt"],
+                "finishedAt": t["finishedAt"],
+            }
+            for t in tasks[(page - 1) * 25 : page * 25]
+        ]
+        return {"items": items, "page": page, "totalPages": -(-len(tasks) // 25)}
 
     async def cancel_task(self, task_id: str) -> None:
         self.cancelled.append(task_id)

@@ -35,9 +35,10 @@ restic or the repositories.
   `COOLDOWN_SECONDS` once no task is active for that schedule any more, so zerobyte's
   background `restic stats` (invisible to the API) can finish.
 - **Startup:** checks `/api/healthcheck` and the API key and fails fast if either
-  fails. Adopts backups that are already running. Warns about schedules still enabled
-  in zerobyte. Then **catches up once**: a schedule whose last cron time has passed
-  since its `lastBackupAt` is queued one time.
+  fails. Warns about schedules still enabled in zerobyte. Restores the saved state and
+  reconciles it with zerobyte (see [Restarts and state](#restarts-and-state)), adopts
+  backups that are already running, then **catches up once**: a schedule whose last
+  cron time has passed since its `lastBackupAt` is queued one time.
 - If a task runs longer than `TASK_TIMEOUT_HOURS`, it is logged as `event=timeout` and
   its slot is freed. It is cancelled only if `CANCEL_ON_TIMEOUT=true`.
 - No retries by default (zerobyte already records the failure). Set `RETRY_COUNT` to
@@ -64,6 +65,7 @@ All configuration is through environment variables.
 | `SCHEDULES_FILE` | `/config/schedules.yml` | YAML schedules / overrides file |
 | `SCHEDULE_REFRESH_SECONDS` | `300` | how often the schedule list and file are reloaded |
 | `CATCH_UP` | `true` | at startup, queue once every schedule that missed its last run |
+| `STATE_FILE` | *unset* | JSON file keeping the queue, running backups and cool-downs across restarts (e.g. `/state/state.json`); see [Restarts and state](#restarts-and-state) |
 | `RETRY_COUNT` | `0` | re-queue a failed backup this many times |
 | `RETRY_DELAY_SECONDS` | `600` | delay before a retry |
 | `HEALTH_PORT` | `8080` | port for `GET /healthz`; `0` disables it |
@@ -93,6 +95,42 @@ and the previous schedule table is kept.
 **Time zone and DST:** cron times are computed in `TZ`. On the night clocks go back, a
 wall-clock time that happens twice (for example 02:30) runs only once, like classic
 cron.
+
+## Restarts and state
+
+A restart (image upgrade, host reboot, OOM kill) leaves running backups alone in
+zerobyte: nothing is cancelled at shutdown.
+
+With `STATE_FILE` set, the scheduler saves its state after every change, atomically
+(temporary file, fsync, rename):
+
+- the queue, in order, with each job's trigger, attempt and retry time;
+- the backups it started and is watching, with their real start time (so
+  `TASK_TIMEOUT_HOURS` keeps counting from the real start) and attempt;
+- the cool-downs, the tasks given up on after `TASK_TIMEOUT_HOURS`, and the counters.
+
+At startup the saved state is **reconciled with zerobyte, which wins**:
+
+| Saved / found | Result |
+|---|---|
+| backup still active in zerobyte | watched again (`event=resumed`) |
+| backup finished while the scheduler was down | `event=finished … recovered=true` with the real status and duration; cool-down counted from its real end; opt-in retry queued if it failed |
+| backup unknown to zerobyte | `event=finished status=unknown recovered=true`, full cool-down |
+| active backup not in the saved state (manual run) | adopted (`event=adopted`) |
+| queued job whose schedule was removed, or is running now | dropped (`event=queue_dropped`) |
+| task given up on after `TASK_TIMEOUT_HOURS`, still running | stays given up on (no second `timeout`) |
+
+Whether or not `STATE_FILE` is set, the scheduler also reads zerobyte's task history
+(`GET /api/v1/tasks/history`): a `backup` or `forget` that finished less than
+`COOLDOWN_SECONDS` ago puts its schedule back in cool-down, so the invisible
+`restic stats` that follows is still protected after a restart.
+
+The state file must be on a writable volume owned by uid 10001 (the image creates
+`/state` for that; see [compose.example.yml](compose.example.yml)). If the file cannot
+be parsed, it is renamed to `<file>.corrupt`, an `event=state_error` is logged and the
+scheduler starts from what zerobyte reports. A failing save is logged once, retried on
+every loop, and shown as `state_ok: false` in `/healthz`. `--once` and `--check` never
+read or write the file. Do not share one state file between two instances.
 
 ## Disabling zerobyte's own schedules
 
@@ -156,7 +194,8 @@ configuration or startup error.
 
 Returns `200` when the main loop has ticked within the last 3 poll intervals and the
 last API call succeeded, `503` otherwise. The body only holds counters (queued, running,
-cool-down, started, succeeded, failed), no schedule or task ids.
+cool-down, started, succeeded, failed) and `state_ok` (`null` without `STATE_FILE`), no
+schedule or task ids.
 
 ## Logs
 
@@ -174,6 +213,8 @@ ts=2026-10-08T01:12:40.118Z level=info event=finished schedule=abc123 name=Photo
 | `schedule`, `schedules_loaded` | schedule table at startup |
 | `still_enabled` | schedule still enabled in zerobyte (warning) |
 | `active_task`, `adopted` | heavy task found running at startup; backups are adopted and waited for |
+| `state_loaded`, `state_reconciled`, `state_error`, `state_saved` | state file loaded / reconciled at startup, load or save failure, saving works again |
+| `resumed`, `queue_restored`, `queue_dropped`, `cooldown_restored` | startup reconciliation of the saved state and the task history |
 | `catchup` | missed run queued at startup |
 | `queued`, `started`, `finished` | job lifecycle (`status=succeeded/failed/cancelled/stale/unknown`) |
 | `skip` | due again while still queued or running, or zerobyte says it is already running |
@@ -181,7 +222,7 @@ ts=2026-10-08T01:12:40.118Z level=info event=finished schedule=abc123 name=Photo
 | `timeout`, `cancel_requested` | task exceeded `TASK_TIMEOUT_HOURS` |
 | `error`, `api_error` | a backup could not be started / the API call failed |
 | `schedule_added`, `schedule_changed`, `schedule_removed`, `refresh_failed` | periodic refresh |
-| `shutdown_inflight` | task left running at shutdown (adopted again on restart) |
+| `shutdown_inflight` | task left running at shutdown (resumed on restart) |
 
 ## Development
 

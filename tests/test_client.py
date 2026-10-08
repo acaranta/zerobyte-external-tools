@@ -102,3 +102,20 @@ async def test_cancel(client):
     route = respx.post(f"{BASE}/api/v1/tasks/t1/cancel").respond(202, json={"status": "cancelling"})
     await client.cancel_task("t1")
     assert route.called
+
+
+@respx.mock
+async def test_task_history(client):
+    route = respx.get(f"{BASE}/api/v1/tasks/history").respond(
+        json={"items": [{"id": "t1"}], "page": 2, "totalPages": 3}
+    )
+    body = await client.list_task_history(kind="forget", page=2)
+    assert body["items"] == [{"id": "t1"}]
+    assert dict(route.calls.last.request.url.params) == {"kind": "forget", "page": "2"}
+
+
+@respx.mock
+async def test_task_history_bad_shape(client):
+    respx.get(f"{BASE}/api/v1/tasks/history").respond(json=[])
+    with pytest.raises(ZerobyteError, match="history"):
+        await client.list_task_history(kind="backup")

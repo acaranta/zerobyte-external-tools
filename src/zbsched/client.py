@@ -141,5 +141,14 @@ class ZerobyteClient:
             raise ZerobyteError("GET /api/v1/tasks: expected a list")
         return body
 
+    async def list_task_history(self, *, kind: str, page: int = 1) -> dict[str, Any]:
+        """One page of finished and active tasks, newest created first (25 per page)."""
+        body = await self._json(
+            "GET", "/api/v1/tasks/history", params={"kind": kind, "page": str(page)}
+        )
+        if not isinstance(body, dict) or not isinstance(body.get("items"), list):
+            raise ZerobyteError("GET /api/v1/tasks/history: expected an object with items")
+        return body
+
     async def cancel_task(self, task_id: str) -> None:
         await self._request("POST", f"/api/v1/tasks/{task_id}/cancel")

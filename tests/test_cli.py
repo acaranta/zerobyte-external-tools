@@ -1,3 +1,6 @@
+import json
+import threading
+
 import pytest
 
 from fake_server import API_KEY, schedule, serve
@@ -61,3 +64,38 @@ def test_missing_url(env, capsys):
     env.delenv("ZEROBYTE_URL")
     assert main(["--check"]) == EXIT_CONFIG
     assert "ZEROBYTE_URL is required" in capsys.readouterr().out
+
+
+def test_once_and_check_ignore_state_file(env, tmp_path):
+    state = tmp_path / "state.json"
+    env.setenv("STATE_FILE", str(state))
+    assert main(["--check"]) == EXIT_OK
+    assert main(["--once", "b"]) == EXIT_OK
+    assert not state.exists()
+
+
+def test_daemon_saves_state_on_shutdown(env, fake, tmp_path, capsys):
+    state = tmp_path / "state.json"
+    env.setenv("STATE_FILE", str(state))
+    env.setenv("COOLDOWN_SECONDS", "30")
+    fake[1].schedules[1]["lastBackupAt"] = 0  # "b" missed a run: catch-up starts it at once
+
+    # Stop the daemon with SIGINT once the first backup has started.
+    def stop_when_started():
+        for _ in range(100):
+            if fake[1].run_log:
+                break
+            threading.Event().wait(0.05)
+        import os
+        import signal
+
+        os.kill(os.getpid(), signal.SIGINT)
+
+    threading.Thread(target=stop_when_started, daemon=True).start()
+    assert main([]) == EXIT_OK
+    data = json.loads(state.read_text())
+    assert data["version"] == 1
+    assert data["stats"]["started"] >= 1
+    out = capsys.readouterr().out
+    assert "event=state_loaded" in out
+    assert "event=state_reconciled" in out

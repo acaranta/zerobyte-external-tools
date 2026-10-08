@@ -30,6 +30,7 @@ class Settings:
     schedules_file: Path = Path("/config/schedules.yml")
     schedule_refresh: float = 300.0
     catch_up: bool = True
+    state_file: Path | None = None
     retry_count: int = 0
     retry_delay: float = 600.0
     health_port: int = 8080
@@ -148,6 +149,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         schedules_file=Path(_get(env, "SCHEDULES_FILE") or "/config/schedules.yml"),
         schedule_refresh=_float(env, "SCHEDULE_REFRESH_SECONDS", 300.0, minimum=10.0),
         catch_up=_bool(env, "CATCH_UP", True),
+        state_file=Path(state_file) if (state_file := _get(env, "STATE_FILE")) else None,
         retry_count=_int(env, "RETRY_COUNT", 0, minimum=0),
         retry_delay=_float(env, "RETRY_DELAY_SECONDS", 600.0, minimum=0.0),
         health_port=_int(env, "HEALTH_PORT", 8080, minimum=0),
