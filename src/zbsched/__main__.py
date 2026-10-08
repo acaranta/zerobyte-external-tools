@@ -18,11 +18,11 @@ from datetime import datetime
 from . import __version__
 from .client import ZerobyteClient, ZerobyteError
 from .config import ConfigError, Settings, load_settings
-from .health import start_health_server
 from .logs import log_event, setup_logging
 from .scheduler import Scheduler
 from .schedules import ScheduleError
 from .state import StateStore
+from .web import start_web_server
 
 EXIT_OK, EXIT_FAILED, EXIT_CONFIG = 0, 1, 2
 
@@ -132,7 +132,7 @@ async def amain(settings: Settings, args: argparse.Namespace) -> int:
             )
             return EXIT_FAILED if scheduler.stats.failed or stop.is_set() else EXIT_OK
 
-        server = None
+        runner = None
         if settings.health_port:
 
             def health() -> tuple[bool, dict]:
@@ -142,7 +142,7 @@ async def amain(settings: Settings, args: argparse.Namespace) -> int:
                 )
                 return fresh and scheduler.api_ok, scheduler.status()
 
-            server = await start_health_server(settings.health_port, health, settings.health_bind)
+            runner = await start_web_server(settings, scheduler, health)
 
         log_event(
             logging.INFO,
@@ -153,12 +153,13 @@ async def amain(settings: Settings, args: argparse.Namespace) -> int:
             poll=f"{settings.poll_interval:.0f}s",
             tz=settings.tz,
             state_file=settings.state_file,
+            ui_enabled=bool(settings.health_port and settings.ui_key),
         )
         try:
             await scheduler.run(stop)
         finally:
-            if server is not None:
-                server.close()
+            if runner is not None:
+                await runner.cleanup()
             for sid, run in scheduler.running.items():
                 log_event(
                     logging.WARNING,

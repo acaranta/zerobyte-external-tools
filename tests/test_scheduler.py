@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from dataclasses import replace
 from datetime import datetime
@@ -6,7 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from fakes import Clock, FakeZerobyte
-from zbsched.client import ZerobyteError
+from zbsched.client import NotFound, ZerobyteError
 from zbsched.config import load_settings
 from zbsched.scheduler import Scheduler
 
@@ -373,3 +374,194 @@ async def test_due_job_starts_in_the_same_tick_with_a_moving_clock(make):
     s.clock = ticking
     await fire(s, clock)
     assert fake.run_calls == ["a"]
+
+
+# ------------------------------------------------------------- web UI actions
+
+
+async def test_run_next_queues_first_and_moves_queued_job(make):
+    s, fake, clock = make([sched("a"), sched("b"), sched("c")])
+    await s.bootstrap()
+    await fire(s, clock)  # a runs, b and c queued
+    result = await s.run_next("c")
+    assert result.ok
+    assert [(j.short_id, j.reason) for j in s.queue] == [("c", "cron"), ("b", "cron")]
+    assert s.wake.is_set()
+    fake.finish(running_task(fake, "a"))
+    await fire(s, clock, 1)
+    assert fake.run_calls == ["a", "c"]
+
+
+async def test_run_next_new_job_waits_for_a_slot(make):
+    s, fake, clock = make([sched("a"), sched("b", cron="0 5 * * *")])
+    await s.bootstrap()
+    await fire(s, clock)  # a runs
+    assert (await s.run_next("b")).ok
+    assert [(j.short_id, j.reason) for j in s.queue] == [("b", "manual")]
+    await fire(s, clock, 1)
+    assert fake.run_calls == ["a"]  # MAX_CONCURRENT=1 still holds
+
+
+async def test_run_next_refuses_running_and_unknown(make):
+    s, _, clock = make([sched("a")])
+    await s.bootstrap()
+    await fire(s, clock)
+    assert (await s.run_next("a")).status == 409
+    assert (await s.run_next("nope")).status == 404
+
+
+async def test_run_now_ignores_the_limit(make):
+    s, fake, clock = make([sched("a"), sched("b")])
+    await s.bootstrap()
+    await fire(s, clock)  # a runs, b queued
+    result = await s.run_now("b")
+    assert result.ok, result
+    assert fake.run_calls == ["a", "b"]
+    assert not s.queue
+    assert s.running["b"].reason == "forced"
+    assert fake.heavy_active() == 2
+    assert (await s.run_now("b")).status == 409
+
+
+async def test_run_now_adopts_on_conflict(make):
+    s, fake, _ = make([sched("a", cron="0 5 * * *")])
+    await s.bootstrap()
+    manual = fake.external_task("backup", "a")
+    result = await s.run_now("a")
+    assert result.ok
+    assert s.running["a"].task_id == manual
+
+
+async def test_run_now_when_zerobyte_is_down(make):
+    s, fake, _ = make([sched("a", cron="0 5 * * *")])
+    await s.bootstrap()
+    fake.down = True
+    result = await s.run_now("a")
+    assert (result.ok, result.status) == (False, 502)
+    assert not s.queue
+    assert not s.running
+
+
+async def test_cancel_running_backup(make, caplog):
+    s, fake, clock = make([sched("a")], RETRY_COUNT=2)
+    await s.bootstrap()
+    await fire(s, clock)
+    tid = s.running["a"].task_id
+    result = await s.cancel("a")
+    assert result.ok
+    assert fake.cancelled == [tid]
+    assert "a" in s.running  # still watched until zerobyte reports the end
+    caplog.set_level(logging.INFO, logger="zbsched")
+    fake.finish(tid, "cancelled")
+    await fire(s, clock, 20)
+    finished = [r for r in caplog.records if getattr(r, "event", None) == "finished"]
+    assert finished[0].fields["status"] == "cancelled"
+    assert s.last_results["a"]["status"] == "cancelled"
+    assert not s.queue  # no retry for a cancel
+
+
+async def test_cancel_queued_job(make):
+    s, fake, clock = make([sched("a"), sched("b")])
+    await s.bootstrap()
+    await fire(s, clock)
+    assert (await s.cancel("b")).ok
+    assert not s.queue
+    assert fake.cancelled == []
+
+
+async def test_cancel_external_task_and_nothing_to_cancel(make):
+    s, fake, _ = make([sched("a", cron="0 5 * * *")])
+    await s.bootstrap()
+    assert (await s.cancel("a")).status == 409
+    manual = fake.external_task("backup", "a")
+    assert (await s.cancel("a")).ok
+    assert fake.cancelled == [manual]
+    assert (await s.cancel("zzz")).status == 404
+
+
+async def test_refresh_now_reports_problems(make):
+    s, fake, _ = make([sched("a")])
+    await s.bootstrap()
+    assert await s.refresh_now() == []
+    fake.down = True
+    problems = await s.refresh_now()
+    assert problems and "refused" in problems[0]
+    assert set(s.table) == {"a"}
+
+
+async def test_tick_lists_active_tasks_even_when_idle(make):
+    s, fake, clock = make([sched("a", cron="0 5 * * *")])
+    await s.bootstrap()
+    manual = fake.external_task("backup", "a")
+    await fire(s, clock)
+    assert [t["id"] for t in s.last_active] == [manual]
+
+
+async def test_run_loop_wakes_up_on_ui_action(make):
+    s, fake, _ = make([sched("a", cron="0 5 * * *")])
+    await s.bootstrap()
+    stop = asyncio.Event()
+    loop = asyncio.create_task(s.run(stop))
+    try:
+        await asyncio.sleep(0.05)  # first tick done, now sleeping for the poll interval
+        assert (await s.run_next("a")).ok
+        for _ in range(50):
+            if fake.run_calls:
+                break
+            await asyncio.sleep(0.01)
+        assert fake.run_calls == ["a"]
+    finally:
+        stop.set()
+        await asyncio.wait_for(loop, timeout=2)
+
+
+async def test_run_now_failure_keeps_the_queued_job(make):
+    s, fake, clock = make([sched("a"), sched("b")], RETRY_COUNT=1)
+    await s.bootstrap()
+    await fire(s, clock)  # a runs, b queued by cron
+    fake.run_errors["b"] = ZerobyteError("HTTP 500 boom", 500)
+    result = await s.run_now("b")
+    assert (result.ok, result.status) == (False, 502)
+    assert "boom" in result.message
+    assert [(j.short_id, j.reason) for j in s.queue] == [("b", "cron")]  # kept, no retry job
+    fake.run_errors["b"] = NotFound("HTTP 404 Backup schedule not found", 404)
+    assert (await s.run_now("b")).status == 404
+    assert [j.short_id for j in s.queue] == ["b"]
+
+
+async def test_run_now_success_drops_the_queued_job(make):
+    s, _, clock = make([sched("a"), sched("b")])
+    await s.bootstrap()
+    await fire(s, clock)
+    assert (await s.run_now("b")).ok
+    assert not s.queue
+
+
+async def test_run_now_reports_adoption(make):
+    s, fake, _ = make([sched("a", cron="0 5 * * *")])
+    await s.bootstrap()
+    fake.external_task("backup", "a")
+    result = await s.run_now("a")
+    assert result.ok
+    assert "already running" in result.message
+
+
+async def test_run_next_clears_a_retry_delay(make):
+    s, fake, clock = make([sched("a"), sched("b")], RETRY_COUNT=1, RETRY_DELAY_SECONDS=600)
+    await s.bootstrap()
+    await fire(s, clock)  # a runs
+    fake.finish(running_task(fake, "a"), "failed")
+    await fire(s, clock, 1)  # a fails -> retry queued 600 s later, b starts
+    retry = next(j for j in s.queue if j.short_id == "a")
+    assert retry.not_before > clock()
+    assert (await s.run_next("a")).ok
+    assert s.queue[0].short_id == "a"
+    assert s.queue[0].not_before == 0.0
+
+
+async def test_cancel_external_forget(make):
+    s, fake, _ = make([sched("a", cron="0 5 * * *")])
+    await s.bootstrap()
+    forget = fake.external_task("forget", "a")
+    assert (await s.cancel("a")).ok
+    assert fake.cancelled == [forget]

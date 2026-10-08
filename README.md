@@ -68,8 +68,10 @@ All configuration is through environment variables.
 | `STATE_FILE` | *unset* | JSON file keeping the queue, running backups and cool-downs across restarts (e.g. `/state/state.json`); see [Restarts and state](#restarts-and-state) |
 | `RETRY_COUNT` | `0` | re-queue a failed backup this many times |
 | `RETRY_DELAY_SECONDS` | `600` | delay before a retry |
-| `HEALTH_PORT` | `8080` | port for `GET /healthz`; `0` disables it |
-| `HEALTH_BIND` | `127.0.0.1` | address `/healthz` listens on (set `0.0.0.0` to reach it from outside the container) |
+| `HEALTH_PORT` | `8080` | port for the web interface and `GET /healthz`; `0` disables both |
+| `HEALTH_BIND` | `127.0.0.1` | address they listen on (set `0.0.0.0` to reach them from outside the container) |
+| `SCHEDULER_API_KEY` | *unset* | key for the [web interface](#web-interface), at least 16 characters. Unset: the interface is disabled, only `/healthz` is served |
+| `SCHEDULER_API_KEY_FILE` | | alternative: file holding that key (e.g. a mounted Docker secret) |
 | `TZ` | `Europe/Paris` | time zone for cron expressions; **must match zerobyte's** |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
@@ -162,10 +164,12 @@ because zerobyte would run it as well, which defeats the purpose.
 ### Docker Compose
 
 See [compose.example.yml](compose.example.yml). It pulls the image built by CI and
-reads the API key from the `ZEROBYTE_API_KEY` environment variable (shell or `.env`):
+reads the zerobyte API key and the web interface key from the environment (shell or
+`.env`):
 
 ```sh
-echo 'ZEROBYTE_API_KEY=zb_xxx' > .env && chmod 600 .env
+printf 'ZEROBYTE_API_KEY=zb_xxx\nSCHEDULER_API_KEY=%s\n' "$(openssl rand -hex 24)" > .env
+chmod 600 .env
 cp config/schedules.example.yml schedules.yml   # optional with SCHEDULE_SOURCE=zerobyte
 docker compose -f compose.example.yml up -d
 ```
@@ -195,7 +199,52 @@ configuration or startup error.
 Returns `200` when the main loop has ticked within the last 3 poll intervals and the
 last API call succeeded, `503` otherwise. The body only holds counters (queued, running,
 cool-down, started, succeeded, failed) and `state_ok` (`null` without `STATE_FILE`), no
-schedule or task ids.
+schedule or task ids. It needs no key, even when the web interface is enabled.
+
+## Web interface
+
+With `SCHEDULER_API_KEY` set, `http://<host>:8080/` shows the schedules and the queue
+and lets you act on them. Sign in with the key; the browser then keeps a session cookie
+for 7 days.
+
+The top of the page shows the **slots**: one box per `MAX_CONCURRENT` slot, taken by a
+running backup, a task started outside the scheduler, or a cool-down. A backup started
+with *Run now* beyond the limit appears as an extra box marked *Over the limit*. Next
+to it is the queue, in order. Below, one row per schedule: cron, next run, state, last
+result, and a warning if the schedule is still enabled in zerobyte. The page refreshes
+every 5 seconds, from the scheduler's memory only: it makes no zerobyte API call.
+
+| Button | Effect |
+|---|---|
+| **Refresh schedules** | reload the schedule list from zerobyte and the schedules file now. On an error the previous list is kept and the problem is shown |
+| **Run next** / **Move first** | put the schedule at the head of the queue (`trigger=manual`). It still waits for a free slot, so `MAX_CONCURRENT` and the cool-down still apply |
+| **Run now** | start the backup right away (`trigger=forced`), even if every slot is taken. Asks for confirmation |
+| **Cancel** | cancel the active backup in zerobyte (also one started from the zerobyte UI). The backup is then logged as `finished status=cancelled`, followed by the normal cool-down, and never retried |
+| **Remove** | take a queued schedule out of the queue |
+
+None of these change the schedule itself: its cron keeps firing as before.
+
+Every action logs `event=ui_action action=<run_next|run_now|cancel|refresh>
+schedule=… result=… client=<ip>`.
+
+The same JSON API works with curl, using the key as a header. POST requests also
+need `X-Zbsched: 1`:
+
+```sh
+curl -H "x-api-key: $SCHEDULER_API_KEY" http://localhost:8080/api/status
+curl -X POST -H "x-api-key: $SCHEDULER_API_KEY" -H 'X-Zbsched: 1' \
+     http://localhost:8080/api/schedules/abc123/run-next      # also run-now, cancel
+curl -X POST -H "x-api-key: $SCHEDULER_API_KEY" -H 'X-Zbsched: 1' http://localhost:8080/api/refresh
+```
+
+**Security.** The interface can start and cancel backups, so:
+
+- reach it through a reverse proxy over https, or on a private network. Behind https
+  (`X-Forwarded-Proto: https`) the cookie is marked `Secure`;
+- the cookie is `HttpOnly` and `SameSite=Strict`, holds a signature rather than the key,
+  and is invalidated when the key changes. Each POST also needs the `X-Zbsched` header,
+  which blocks cross-site requests;
+- a wrong key is answered after 1 second and logged as `event=ui_login_failed`.
 
 ## Logs
 
@@ -223,6 +272,7 @@ ts=2026-10-08T01:12:40.118Z level=info event=finished schedule=abc123 name=Photo
 | `error`, `api_error` | a backup could not be started / the API call failed |
 | `schedule_added`, `schedule_changed`, `schedule_removed`, `refresh_failed` | periodic refresh |
 | `shutdown_inflight` | task left running at shutdown (resumed on restart) |
+| `http_listening`, `ui_login`, `ui_login_failed`, `ui_action` | web interface: listening, sign-ins, actions (`dequeued reason=ui` / `cancel_requested source=ui` follow) |
 
 ## Development
 
@@ -238,5 +288,9 @@ by the CLI tests, which can also be run by hand for a local end-to-end check:
 ```sh
 uv run python tests/fake_server.py --port 48096 --task-seconds 15 &
 ZEROBYTE_URL=http://127.0.0.1:48096 ZEROBYTE_API_KEY=test-key SCHEDULES_FILE=/nonexistent \
-  POLL_INTERVAL_SECONDS=5 COOLDOWN_SECONDS=3 uv run python -m zbsched
+  SCHEDULER_API_KEY=local-test-key-1234 POLL_INTERVAL_SECONDS=5 COOLDOWN_SECONDS=3 \
+  uv run python -m zbsched
 ```
+
+Then open http://127.0.0.1:8080/ and sign in with `local-test-key-1234`. The fake also
+answers task cancellation.

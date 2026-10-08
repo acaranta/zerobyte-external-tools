@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>zbsched</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='3' width='6' height='10' rx='1.5' fill='%232563a8'/%3E%3Crect x='9' y='3' width='6' height='10' rx='1.5' fill='none' stroke='%235b6b7f' stroke-width='1.5'/%3E%3C/svg%3E">
+<style>
+:root {
+  --paper: #f3f5f7;
+  --panel: #ffffff;
+  --ink: #18212b;
+  --muted: #5b6b7f;
+  --rule: #d5dbe1;
+  --run: #2563a8;
+  --run-soft: #dfeaf6;
+  --queue: #a86a12;
+  --queue-soft: #f7ecd9;
+  --cool: #6b5fa8;
+  --cool-soft: #ebe8f6;
+  --ok: #2f7d4f;
+  --bad: #b42318;
+  --bad-soft: #fbe5e2;
+  --focus: #2563a8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #12171d;
+    --panel: #1a2129;
+    --ink: #e4e9ee;
+    --muted: #93a1b1;
+    --rule: #2d3742;
+    --run: #6aa6e6;
+    --run-soft: #1d3249;
+    --queue: #e0a647;
+    --queue-soft: #3a2d17;
+    --cool: #a99ce6;
+    --cool-soft: #2b2742;
+    --ok: #63c08a;
+    --bad: #f07a6c;
+    --bad-soft: #43201c;
+    --focus: #6aa6e6;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+code, .mono { font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace; font-size: 13px; }
+button {
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled { opacity: .4; cursor: default; }
+button.primary { background: var(--run); border-color: var(--run); color: #fff; }
+button.danger:not(:disabled) { color: var(--bad); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+.wrap { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; }
+
+/* ---- header */
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px; }
+h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+.health { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--muted); font-size: 13px; flex: 1; }
+.health .bad { color: var(--bad); font-weight: 600; }
+.tools { display: flex; gap: 8px; margin-left: auto; }
+
+/* ---- slot rail: the one memorable thing */
+.rail {
+  margin: 22px 0 28px;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+}
+.rail h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.bays { display: flex; flex-wrap: wrap; gap: 10px; }
+.bay {
+  flex: 1 1 210px;
+  min-height: 92px;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 2px dashed var(--rule);
+  display: flex; flex-direction: column; justify-content: center;
+}
+.bay.free { color: var(--muted); align-items: center; }
+.bay.taken { border-style: solid; }
+.bay.running { border-color: var(--run); background: var(--run-soft); }
+.bay.external { border-color: var(--queue); background: var(--queue-soft); }
+.bay.cooldown { border-color: var(--cool); background: var(--cool-soft); }
+.bay.over { box-shadow: inset 0 0 0 2px var(--bad); }
+.bay strong { font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
+.bay .what { font-size: 13px; color: var(--muted); }
+.bay .over-note { font-size: 12px; color: var(--bad); font-weight: 600; }
+.bay .bar { height: 3px; margin-top: 8px; border-radius: 2px; background: currentColor; opacity: .25; position: relative; overflow: hidden; }
+.bay.running .bar { color: var(--run); opacity: 1; background: var(--run-soft); }
+.bay.running .bar::after {
+  content: ""; position: absolute; inset: 0; width: 30%;
+  background: var(--run); border-radius: 2px;
+  animation: sweep 2.4s ease-in-out infinite;
+}
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .bay.running .bar::after { animation: none; width: 100%; } }
+
+.line { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.line li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px; border-radius: 8px;
+  background: var(--panel); border-left: 4px solid var(--queue);
+}
+.line .pos { font-weight: 700; color: var(--queue); min-width: 1.4em; }
+.line .name { flex: 1; overflow-wrap: anywhere; }
+.line .why { font-size: 12px; color: var(--muted); }
+.line .empty { border-left-color: var(--rule); color: var(--muted); }
+
+/* ---- schedule table */
+table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 10px; overflow: hidden; }
+th { text-align: left; font-size: 13px; font-weight: 600; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--rule); }
+td { padding: 10px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td .sub { display: block; font-size: 12px; color: var(--muted); }
+.sname { font-weight: 600; }
+.warn { display: inline-block; margin-top: 3px; font-size: 12px; color: var(--bad); font-weight: 600; }
+.state { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.state.running { background: var(--run-soft); color: var(--run); }
+.state.queued { background: var(--queue-soft); color: var(--queue); }
+.state.busy_external { background: var(--queue-soft); color: var(--queue); }
+.state.cooldown { background: var(--cool-soft); color: var(--cool); }
+.state.idle { color: var(--muted); padding-left: 0; }
+.result.succeeded, .result.success { color: var(--ok); }
+.result.failed, .result.timeout, .result.error, .result.unknown, .result.stale { color: var(--bad); }
+.result.cancelled, .result.warning { color: var(--queue); }
+.err { display: block; font-size: 12px; color: var(--muted); max-width: 34ch; overflow-wrap: anywhere; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.empty-table { padding: 28px; text-align: center; color: var(--muted); }
+
+/* ---- login */
+.login { max-width: 360px; margin: 14vh auto 0; padding: 0 16px; }
+.login h1 { margin-bottom: 4px; }
+.login p { color: var(--muted); margin: 0 0 20px; }
+.login label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.login input {
+  width: 100%; font: inherit; padding: 9px 11px; border-radius: 6px;
+  border: 1px solid var(--rule); background: var(--panel); color: var(--ink);
+}
+.login button { margin-top: 12px; width: 100%; padding: 9px; }
+.login .msg { color: var(--bad); font-size: 14px; min-height: 1.5em; margin-top: 10px; }
+
+/* ---- toast */
+#toast {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+  max-width: min(560px, calc(100vw - 32px));
+  background: var(--ink); color: var(--paper);
+  padding: 10px 16px; border-radius: 8px; font-size: 14px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
+}
+#toast.bad { background: var(--bad); color: #fff; }
+
+@media (max-width: 760px) {
+  .rail { grid-template-columns: minmax(0, 1fr); }
+  .tools { margin-left: 0; }
+  .health { flex-basis: 100%; order: 3; }
+  thead { display: none; }
+  table, tbody, tr, td { display: block; }
+  tr { border-bottom: 1px solid var(--rule); padding: 8px 0; }
+  tr:last-child { border-bottom: 0; }
+  td { border: 0; padding: 4px 14px; }
+  td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); }
+  .actions { justify-content: flex-start; padding-top: 6px; }
+}
+</style>
+</head>
+<body>
+
+<section class="login" id="login" hidden>
+  <h1>zbsched</h1>
+  <p>Enter the scheduler key to see and control the backup queue.</p>
+  <form id="login-form">
+    <label for="key">Scheduler key</label>
+    <input id="key" name="key" type="password" autocomplete="current-password" required>
+    <button class="primary" type="submit">Sign in</button>
+    <div class="msg" id="login-msg" role="alert"></div>
+  </form>
+</section>
+
+<main class="wrap" id="app" hidden>
+  <header>
+    <h1>Backup queue</h1>
+    <div class="health" id="health"></div>
+    <div class="tools">
+      <button id="refresh" type="button" title="Reload the schedule list from zerobyte now">Refresh schedules</button>
+      <button id="logout" type="button">Log out</button>
+    </div>
+  </header>
+
+  <section class="rail">
+    <div>
+      <h2 id="bays-title">Slots</h2>
+      <div class="bays" id="bays"></div>
+    </div>
+    <div>
+      <h2>Waiting</h2>
+      <ol class="line" id="line"></ol>
+    </div>
+  </section>
+
+  <table>
+    <thead>
+      <tr><th>Schedule</th><th>Cron</th><th>Next run</th><th>State</th><th>Last backup</th><th><span hidden>Actions</span></th></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+</main>
+
+<div id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+"use strict";
+const POLL_MS = 5000;
+const $ = (id) => document.getElementById(id);
+let timer = null;
+let offset = 0; // server clock minus browser clock, in seconds
+let tz = undefined;
+let busy = false;
+
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === "class") node.className = v;
+    else if (k === "text") node.textContent = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children) if (c !== null && c !== undefined) node.append(c);
+  return node;
+}
+
+async function api(path, method = "GET", body) {
+  const headers = { "X-Zbsched": "1" };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const r = await fetch(path, {
+    method, headers, credentials: "same-origin",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let data = {};
+  try { data = await r.json(); } catch (_) { /* empty body */ }
+  return { status: r.status, data };
+}
+
+function nowS() { return Date.now() / 1000 + offset; }
+
+function span(seconds) {
+  seconds = Math.max(0, Math.round(seconds));
+  if (seconds < 60) return `${seconds} s`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h} h ${m % 60} min`;
+  return `${Math.floor(h / 24)} days`;
+}
+
+function clock(ts, withDay) {
+  if (ts === null || ts === undefined) return "";
+  const d = new Date(ts * 1000);
+  const opts = { hour: "2-digit", minute: "2-digit", timeZone: tz };
+  if (withDay) Object.assign(opts, { weekday: "short", day: "numeric", month: "short" });
+  return new Intl.DateTimeFormat(undefined, opts).format(d);
+}
+
+function nextRun(iso) {
+  if (!iso) return "";
+  const ts = Date.parse(iso) / 1000;
+  const sameDay = Math.abs(ts - nowS()) < 20 * 3600;
+  return `${clock(ts, !sameDay)} (in ${span(ts - nowS())})`;
+}
+
+function toast(message, bad) {
+  const t = $("toast");
+  t.textContent = message;
+  t.className = bad ? "bad" : "";
+  t.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { t.hidden = true; }, bad ? 8000 : 4000);
+}
+
+// ------------------------------------------------------------------- views
+
+function showLogin(message) {
+  stopPolling();
+  $("app").hidden = true;
+  $("login").hidden = false;
+  $("login-msg").textContent = message || "";
+  $("key").focus();
+}
+
+function renderHealth(s) {
+  $("health").replaceChildren(...[
+    el("span", { class: s.api_ok ? "" : "bad", text: s.api_ok ? "zerobyte reachable" : "zerobyte unreachable" }),
+    s.state_ok === false ? el("span", { class: "bad", text: "state file not writable" }) : null,
+    el("span", { text: s.last_tick ? `checked ${span(nowS() - s.last_tick)} ago` : "not checked yet" }),
+    s.last_refresh ? el("span", { text: `schedules loaded ${span(nowS() - s.last_refresh)} ago` }) : null,
+    el("span", { text: `${s.stats.started} started, ${s.stats.succeeded} succeeded, ${s.stats.failed} failed since first start` }),
+  ].filter(Boolean));
+}
+
+function renderBays(s) {
+  const taken = [];
+  for (const row of s.schedules) {
+    if (row.state === "running") {
+      taken.push({ kind: "running", order: row.started_at, name: row.name, what: `backup running for ${span(nowS() - row.started_at)}`, sub: `task ${row.task_id}${row.trigger === "forced" ? ", started with Run now" : ""}` });
+    } else if (row.state === "busy_external" || (row.state === "queued" && row.task_id)) {
+      taken.push({ kind: "external", order: 0, name: row.name, what: `${row.task_kind || "task"} started outside the scheduler`, sub: `task ${row.task_id}` });
+    } else if (row.cooldown_until && row.state !== "queued") {
+      taken.push({ kind: "cooldown", order: 0, name: row.name, what: `cooling down until ${clock(row.cooldown_until)}`, sub: "lets restic stats finish" });
+    }
+  }
+  for (const t of s.other_active) {
+    taken.push({ kind: "external", order: 0, name: t.resource || t.id, what: `${t.kind} ${t.status}`, sub: `task ${t.id}` });
+  }
+  // Oldest first: whatever went past MAX_CONCURRENT (Run now) is marked over the limit.
+  taken.sort((a, b) => a.order - b.order);
+  const total = Math.max(s.max_concurrent, taken.length);
+  $("bays-title").textContent = `Slots: ${Math.min(taken.length, total)} of ${s.max_concurrent} in use`;
+  const bays = [];
+  for (let i = 0; i < total; i++) {
+    const t = taken[i];
+    if (!t) { bays.push(el("div", { class: "bay free", text: "Free" })); continue; }
+    bays.push(el("div", { class: `bay taken ${t.kind}${i >= s.max_concurrent ? " over" : ""}` },
+      i >= s.max_concurrent ? el("span", { class: "over-note", text: "Over the limit" }) : null,
+      el("strong", { text: t.name }),
+      el("span", { class: "what", text: t.what }),
+      el("span", { class: "what", text: t.sub }),
+      t.kind === "running" ? el("div", { class: "bar" }) : null,
+    ));
+  }
+  $("bays").replaceChildren(...bays);
+}
+
+const REASONS = { cron: "cron", catchup: "missed run", retry: "retry", manual: "Run next", forced: "Run now", once: "--once" };
+
+function renderLine(s) {
+  const queued = s.schedules.filter((r) => r.queue_position).sort((a, b) => a.queue_position - b.queue_position);
+  if (!queued.length) {
+    $("line").replaceChildren(el("li", { class: "empty", text: "Nothing is waiting." }));
+    return;
+  }
+  $("line").replaceChildren(...queued.map((r) => el("li", {},
+    el("span", { class: "pos", text: String(r.queue_position) }),
+    el("span", { class: "name", text: r.name }),
+    el("span", { class: "why", text: [REASONS[r.trigger] || r.trigger, r.attempt > 1 ? `attempt ${r.attempt}` : "", r.not_before ? `not before ${clock(r.not_before)}` : ""].filter(Boolean).join(", ") }),
+  )));
+}
+
+function stateCell(r) {
+  const labels = {
+    running: `Running ${span(nowS() - r.started_at)}`,
+    queued: `Waiting, #${r.queue_position}`,
+    busy_external: "Busy in zerobyte",
+    cooldown: `Cool-down until ${clock(r.cooldown_until)}`,
+    idle: "Idle",
+  };
+  return el("span", { class: `state ${r.state}`, text: labels[r.state] || r.state });
+}
+
+// zerobyte's lastBackupStatus uses other words than task statuses.
+const STATUS_LABELS = { success: "succeeded", error: "failed", in_progress: "in progress", warning: "warning" };
+
+function lastCell(r) {
+  const last = r.last;
+  if (!last || (!last.status && !last.finished_at)) return el("span", { class: "sub", text: "Never" });
+  const when = last.finished_at ? `${span(nowS() - last.finished_at)} ago` : "";
+  return el("span", {},
+    el("span", { class: `result ${last.status || ""}`, text: STATUS_LABELS[last.status] || last.status || "unknown" }),
+    el("span", { class: "sub", text: [when, last.duration ? `took ${last.duration}` : ""].filter(Boolean).join(", ") }),
+    last.error ? el("span", { class: "err", text: last.error }) : null,
+  );
+}
+
+function actionButtons(r) {
+  const running = r.state === "running";
+  const cancellable = running || r.state === "queued" || r.state === "busy_external";
+  return el("div", { class: "actions" },
+    el("button", {
+      type: "button", disabled: running, title: "Put it first in the queue; it starts when a slot is free",
+      onclick: () => act(r, "run-next", "Run next"),
+      text: r.state === "queued" ? "Move first" : "Run next",
+    }),
+    el("button", {
+      type: "button", disabled: running, title: "Start it right away, even if every slot is taken",
+      onclick: () => {
+        if (confirm(`Start "${r.name}" now?\n\nThis ignores MAX_CONCURRENT (${lastStatus.max_concurrent}) and the cool-downs.`)) act(r, "run-now", "Run now");
+      },
+      text: "Run now",
+    }),
+    el("button", {
+      type: "button", class: "danger", disabled: !cancellable,
+      title: running || r.state === "busy_external" ? "Cancel the backup task in zerobyte" : "Remove it from the queue",
+      onclick: () => {
+        const what = r.state === "queued" ? `Remove "${r.name}" from the queue?` : `Cancel the running backup of "${r.name}" (task ${r.task_id})?`;
+        if (confirm(what)) act(r, "cancel", "Cancel");
+      },
+      text: r.state === "queued" ? "Remove" : "Cancel",
+    }),
+  );
+}
+
+function renderRows(s) {
+  if (!s.schedules.length) {
+    $("rows").replaceChildren(el("tr", {}, el("td", { colspan: "6", class: "empty-table", text: "No schedules. Check that zerobyte has schedules with a cron expression, or SCHEDULES_FILE, then use Refresh schedules." })));
+    return;
+  }
+  $("rows").replaceChildren(...s.schedules.map((r) => el("tr", {},
+    el("td", {},
+      el("span", { class: "sname", text: r.name }),
+      el("span", { class: "sub mono", text: r.short_id }),
+      r.enabled_in_zerobyte ? el("span", { class: "warn", title: "zerobyte will also run it on its own", text: "Still enabled in zerobyte" }) : null,
+    ),
+    el("td", { "data-label": "Cron" }, el("code", { text: r.cron }), r.source === "file" ? el("span", { class: "sub", text: "from schedules file" }) : null),
+    el("td", { "data-label": "Next run", text: nextRun(r.next_run) }),
+    el("td", { "data-label": "State" }, stateCell(r)),
+    el("td", { "data-label": "Last backup" }, lastCell(r)),
+    el("td", {}, actionButtons(r)),
+  )));
+}
+
+let lastStatus = null;
+function render(s) {
+  lastStatus = s;
+  offset = s.now - Date.now() / 1000;
+  tz = s.tz;
+  renderHealth(s);
+  renderBays(s);
+  renderLine(s);
+  renderRows(s);
+}
+
+// ------------------------------------------------------------------- data
+
+async function poll() {
+  clearTimeout(timer);
+  try {
+    const { status, data } = await api("/api/status");
+    if (status === 401) return showLogin();
+    if (status !== 200) throw new Error(data.error || `HTTP ${status}`);
+    $("login").hidden = true;
+    $("app").hidden = false;
+    render(data);
+  } catch (e) {
+    toast(`Cannot reach the scheduler: ${e.message}`, true);
+  }
+  if (!document.hidden) timer = setTimeout(poll, POLL_MS);
+}
+
+function stopPolling() { clearTimeout(timer); timer = null; }
+
+async function act(row, path, label) {
+  if (busy) return;
+  busy = true;
+  try {
+    const { status, data } = await api(`/api/schedules/${encodeURIComponent(row.short_id)}/${path}`, "POST");
+    if (status === 401) return showLogin("Your session expired. Sign in again.");
+    if (data.ok) toast(`${label}: ${row.name}, ${data.message}.`);
+    else toast(`${label} failed for ${row.name}: ${data.error || `HTTP ${status}`}.`, true);
+  } catch (e) {
+    toast(`${label} failed: ${e.message}`, true);
+  } finally {
+    busy = false;
+    poll();
+  }
+}
+
+$("refresh").addEventListener("click", async () => {
+  const button = $("refresh");
+  button.disabled = true;
+  try {
+    const { status, data } = await api("/api/refresh", "POST");
+    if (status === 401) return showLogin("Your session expired. Sign in again.");
+    if (data.ok) toast("Schedules reloaded from zerobyte.");
+    else toast(`Schedules not reloaded, the previous list is kept: ${(data.problems || [data.error]).join("; ")}`, true);
+  } catch (e) {
+    toast(`Refresh failed: ${e.message}`, true);
+  } finally {
+    button.disabled = false;
+    poll();
+  }
+});
+
+$("logout").addEventListener("click", async () => {
+  await api("/api/logout", "POST");
+  showLogin("Signed out.");
+});
+
+$("login-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const button = ev.target.querySelector("button");
+  button.disabled = true;
+  $("login-msg").textContent = "";
+  try {
+    const { status, data } = await api("/api/login", "POST", { key: $("key").value });
+    if (status === 200) { $("key").value = ""; poll(); }
+    else $("login-msg").textContent = status === 401 ? "That key is not correct." : (data.error || `HTTP ${status}`);
+  } catch (e) {
+    $("login-msg").textContent = `Cannot reach the scheduler: ${e.message}`;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) stopPolling();
+  else if (!$("app").hidden) poll();
+});
+
+poll();
+</script>
+</body>
+</html>

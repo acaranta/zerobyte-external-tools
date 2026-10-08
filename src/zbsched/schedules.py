@@ -72,6 +72,7 @@ class ScheduleEntry:
     source: str  # "zerobyte" or "file"
     enabled_in_zerobyte: bool = False
     last_backup_at: float | None = None  # epoch seconds
+    last_backup_status: str | None = None  # zerobyte's lastBackupStatus
 
     def missed_run(self, now: datetime) -> bool:
         """True when a cron fire time has passed since the last recorded backup."""
@@ -223,5 +224,6 @@ def build_table(
             source=origin,
             enabled_in_zerobyte=bool(sched.get("enabled")),
             last_backup_at=None if last is None else float(last) / 1000.0,
+            last_backup_status=sched.get("lastBackupStatus"),
         )
     return table

@@ -23,6 +23,7 @@ def test_defaults():
     assert s.retry_count == 0
     assert s.health_port == 8080
     assert s.health_bind == "127.0.0.1"
+    assert s.ui_key is None
     assert s.tz == "Europe/Paris"
     assert s.log_level == "INFO"
 
@@ -78,6 +79,8 @@ def test_api_key_file(tmp_path):
         ({**BASE, "TZ": "Mars/Olympus"}, "time zone"),
         ({**BASE, "CATCH_UP": "maybe"}, "boolean"),
         ({**BASE, "LOG_LEVEL": "loud"}, "LOG_LEVEL"),
+        ({**BASE, "SCHEDULER_API_KEY": "short"}, "at least 16"),
+        ({**BASE, "SCHEDULER_API_KEY": "x" * 16, "SCHEDULER_API_KEY_FILE": "/x"}, "only one"),
     ],
 )
 def test_invalid(env, message):
@@ -90,3 +93,12 @@ def test_empty_key_file(tmp_path):
     key.write_text("\n")
     with pytest.raises(ConfigError, match="empty"):
         load_settings({"ZEROBYTE_URL": "http://z", "ZEROBYTE_API_KEY_FILE": str(key)})
+
+
+def test_ui_key(tmp_path):
+    assert load_settings({**BASE, "SCHEDULER_API_KEY": "u" * 16}).ui_key == "u" * 16
+    key = tmp_path / "ui"
+    key.write_text("ui-key-from-a-file\n")
+    assert load_settings({**BASE, "SCHEDULER_API_KEY_FILE": str(key)}).ui_key == (
+        "ui-key-from-a-file"
+    )

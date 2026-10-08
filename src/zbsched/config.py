@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 SCHEDULE_SOURCES = ("zerobyte", "file")
+UI_KEY_MIN_LENGTH = 16
 
 
 class ConfigError(ValueError):
@@ -35,6 +36,7 @@ class Settings:
     retry_delay: float = 600.0
     health_port: int = 8080
     health_bind: str = "127.0.0.1"
+    ui_key: str | None = None
     tz: str = "Europe/Paris"
     log_level: str = "INFO"
 
@@ -88,20 +90,34 @@ def _bool(env: Mapping[str, str], name: str, default: bool) -> bool:
     raise ConfigError(f"{name} must be a boolean (true/false), got {raw!r}")
 
 
-def _api_key(env: Mapping[str, str]) -> str:
-    key = _get(env, "ZEROBYTE_API_KEY")
-    key_file = _get(env, "ZEROBYTE_API_KEY_FILE")
-    if key and key_file:
-        raise ConfigError("set only one of ZEROBYTE_API_KEY and ZEROBYTE_API_KEY_FILE")
-    if key_file:
+def _secret(env: Mapping[str, str], name: str) -> str | None:
+    """Read ``name`` or the file named by ``<name>_FILE`` (setting both is an error)."""
+    value = _get(env, name)
+    file_var = f"{name}_FILE"
+    path = _get(env, file_var)
+    if value and path:
+        raise ConfigError(f"set only one of {name} and {file_var}")
+    if path:
         try:
-            key = Path(key_file).read_text(encoding="utf-8").strip()
+            value = Path(path).read_text(encoding="utf-8").strip()
         except OSError as exc:
-            raise ConfigError(f"cannot read ZEROBYTE_API_KEY_FILE {key_file}: {exc}") from exc
-        if not key:
-            raise ConfigError(f"ZEROBYTE_API_KEY_FILE {key_file} is empty")
+            raise ConfigError(f"cannot read {file_var} {path}: {exc}") from exc
+        if not value:
+            raise ConfigError(f"{file_var} {path} is empty")
+    return value
+
+
+def _api_key(env: Mapping[str, str]) -> str:
+    key = _secret(env, "ZEROBYTE_API_KEY")
     if not key:
         raise ConfigError("ZEROBYTE_API_KEY or ZEROBYTE_API_KEY_FILE is required")
+    return key
+
+
+def _ui_key(env: Mapping[str, str]) -> str | None:
+    key = _secret(env, "SCHEDULER_API_KEY")
+    if key is not None and len(key) < UI_KEY_MIN_LENGTH:
+        raise ConfigError(f"SCHEDULER_API_KEY must be at least {UI_KEY_MIN_LENGTH} characters")
     return key
 
 
@@ -154,6 +170,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         retry_delay=_float(env, "RETRY_DELAY_SECONDS", 600.0, minimum=0.0),
         health_port=_int(env, "HEALTH_PORT", 8080, minimum=0),
         health_bind=_get(env, "HEALTH_BIND") or "127.0.0.1",
+        ui_key=_ui_key(env),
         tz=tz,
         log_level=log_level,
     )

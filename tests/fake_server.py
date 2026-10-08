@@ -2,6 +2,7 @@
 
 Run standalone:  python tests/fake_server.py --port 4096 --task-seconds 20 --schedules a,b,c
 Backup tasks finish (succeeded) after --task-seconds; each is followed by a short forget.
+POST /api/v1/tasks/:id/cancel marks a running task cancelled at once.
 """
 
 from __future__ import annotations
@@ -141,6 +142,14 @@ def make_handler(state: FakeState):
                     ]
                     total = -(-len(tasks) // 25)
                     return self._send(200, {"items": items, "page": page, "totalPages": total})
+                if method == "POST" and len(parts) == 5 and parts[2] == "tasks":
+                    task = state.tasks.get(parts[3])
+                    if task is None:
+                        return self._send(404, {"message": "Task not found"})
+                    if task["status"] == "running":
+                        task["status"] = "cancelled"
+                        task["finishedAt"] = int(time.time() * 1000)
+                    return self._send(200, {"message": "Cancellation requested"})
                 if method == "GET" and len(parts) == 4 and parts[2] == "tasks":
                     task = state.tasks.get(parts[3])
                     if task is None:

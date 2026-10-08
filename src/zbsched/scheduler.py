@@ -20,12 +20,17 @@ Restarts
 With ``STATE_FILE`` set, the queue, the backups being watched, the cool-downs, the
 abandoned task ids and the counters are saved after every change and reconciled
 against zerobyte at startup (see ``reconcile``). zerobyte wins every disagreement.
+
+Web UI actions
+--------------
+``run_next``, ``run_now`` and ``cancel`` are called by the web server between ticks.
+``lock`` serialises them with the main loop, so the queue and ``running`` never change
+while a tick is waiting on the API; ``wake`` makes the loop act on them at once.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import time
 from collections import deque
@@ -61,7 +66,7 @@ HISTORY_MAX_PAGES = 4  # task history pages (25 tasks each) read per kind at sta
 @dataclass
 class Job:
     short_id: str
-    reason: str  # cron | catchup | once | retry
+    reason: str  # cron | catchup | once | retry | manual (UI: run next) | forced (UI: run now)
     attempt: int = 1
     not_before: float = 0.0
     queued_at: float = 0.0
@@ -83,11 +88,20 @@ class Stats:
     failed: int = 0  # failed, cancelled, stale, unknown, start errors, timeouts
 
 
+@dataclass(frozen=True)
+class ActionResult:
+    """Outcome of a web UI action; ``status`` is the HTTP status code to answer."""
+
+    ok: bool
+    message: str
+    status: int = 200
+
+
 def _ms_to_s(value: Any) -> float | None:
     return None if value is None else float(value) / 1000.0
 
 
-def _unit(task: dict[str, Any]) -> str:
+def task_unit(task: dict[str, Any]) -> str:
     if task.get("resourceType") == "backup_schedule" and task.get("resourceId"):
         return str(task["resourceId"])
     return f"task:{task.get('id')}"
@@ -112,6 +126,13 @@ class Scheduler:
     last_tick: float | None = None
     api_ok: bool = False
     last_refresh: float = 0.0
+    # What the web UI shows: active tasks seen at the last tick, and how the last
+    # backup we watched for each schedule ended (memory only, not persisted).
+    last_active: list[dict[str, Any]] = field(default_factory=list)
+    last_results: dict[str, dict[str, Any]] = field(default_factory=dict)
+    last_start_error: ZerobyteError | None = None
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    wake: asyncio.Event = field(default_factory=asyncio.Event)
 
     # ------------------------------------------------------------------ helpers
 
@@ -166,7 +187,7 @@ class Scheduler:
 
     def busy_units(self, active: Iterable[dict[str, Any]]) -> set[str]:
         units = {
-            _unit(t)
+            task_unit(t)
             for t in active
             if t.get("kind") in self.settings.heavy_task_kinds
             and t.get("status", "running") in ACTIVE_STATUSES
@@ -232,20 +253,21 @@ class Scheduler:
                 log_event(INFO, "now_disabled", schedule=sid, name=self._name(sid))
         self.enabled_in_zerobyte = enabled
 
-    async def refresh(self) -> None:
-        """Periodic reload; on any error keep the last good table."""
+    async def refresh(self) -> list[str]:
+        """Reload the table; on any error keep the last good one and return the problems."""
         self.last_refresh = self.clock()
         try:
             table = await self.load_schedules()
         except ScheduleError as exc:
             for problem in exc.problems:
                 log_event(ERROR, "refresh_failed", problem)
-            return
+            return exc.problems
         except ZerobyteError as exc:
             self.api_ok = False
             log_event(ERROR, "refresh_failed", str(exc))
-            return
+            return [str(exc)]
         self.apply_table(table)
+        return []
 
     # ---------------------------------------------------------------- startup
 
@@ -379,7 +401,8 @@ class Scheduler:
         # backup) gets a cool-down too: it is extended until that task ends.
         for task in active:
             if task.get("kind") in self.settings.heavy_task_kinds:
-                self._set_cooldown(_unit(task), now + self.settings.cooldown, now, source="active")
+                until = now + self.settings.cooldown
+                self._set_cooldown(task_unit(task), until, now, source="active")
 
     async def _cooldowns_from_history(self, now: float) -> None:
         """Cool down the schedules whose heavy task finished less than COOLDOWN ago."""
@@ -461,8 +484,7 @@ class Scheduler:
         self.last_tick = now
         if not self.once:
             self._detect_due(now)
-        if not (self.queue or self.running or self.cooldowns):
-            return
+        # Listed even when idle, so the web UI also sees runs started from zerobyte.
         try:
             active = await self.client.list_active_tasks()
         except ZerobyteError as exc:
@@ -470,6 +492,7 @@ class Scheduler:
             log_event(ERROR, "api_error", str(exc), action="list_tasks")
             return
         self.api_ok = True
+        self.last_active = active
         await self._poll_running(active, now)
         self._update_cooldowns(active, now)
         await self._dispatch(active, now)
@@ -510,6 +533,13 @@ class Scheduler:
         finished = (task and _ms_to_s(task.get("finishedAt"))) or now
         error = task.get("error") if task else None
         level = INFO if status == "succeeded" else ERROR if status == "failed" else WARNING
+        self.last_results[run.short_id] = {
+            "status": status,
+            "task": run.task_id,
+            "finished_at": finished,
+            "duration": f"{max(0.0, finished - started):.0f}s",
+            "error": str(error) if error else None,
+        }
         log_event(
             level,
             "finished",
@@ -540,6 +570,13 @@ class Scheduler:
         self.abandoned.add(run.task_id)
         self.stats.failed += 1
         hours = (now - run.started_at) / 3600
+        self.last_results[run.short_id] = {
+            "status": "timeout",
+            "task": run.task_id,
+            "finished_at": now,
+            "duration": f"{now - run.started_at:.0f}s",
+            "error": f"still active after {hours:.1f}h, no longer watched",
+        }
         log_event(
             ERROR,
             "timeout",
@@ -565,7 +602,7 @@ class Scheduler:
         # While a heavy task (e.g. forget) is still active for a schedule in cool-down,
         # restart the cool-down: the background stats call only starts after it.
         active_units = {
-            _unit(t)
+            task_unit(t)
             for t in active
             if t.get("kind") in self.settings.heavy_task_kinds and t.get("id") not in self.abandoned
         }
@@ -597,28 +634,36 @@ class Scheduler:
                 busy.add(job.short_id)
 
     async def _start(self, job: Job, now: float) -> bool | None:
-        """Start ``job``. True: watching a task; False: dropped; None: retry later."""
+        """Start ``job``. True: watching a task; False: dropped; None: retry later.
+
+        When it returns False or None, ``last_start_error`` holds the zerobyte error.
+        """
         sid = job.short_id
+        self.last_start_error = None
         try:
             task_id = await self.client.run_backup(sid)
         except AlreadyRunning:
             return await self._adopt_conflict(job)
         except NotFound as exc:
+            self.last_start_error = exc
             log_event(ERROR, "error", str(exc), schedule=sid, reason="schedule_not_found")
             self.stats.failed += 1
             return False
         except AuthError as exc:
+            self.last_start_error = exc
             self.api_ok = False
             log_event(ERROR, "api_error", str(exc), action="run", schedule=sid)
             return None
         except ZerobyteError as exc:
+            self.last_start_error = exc
             if exc.status is None:
                 self.api_ok = False
                 log_event(ERROR, "api_error", str(exc), action="run", schedule=sid)
                 return None
             log_event(ERROR, "error", str(exc), schedule=sid, name=self._name(sid))
             self.stats.failed += 1
-            self._maybe_retry(sid, job.attempt)
+            if job.reason != "forced":  # the operator sees the error and decides
+                self._maybe_retry(sid, job.attempt)
             return False
         self.running[sid] = Running(sid, task_id, now, job.reason, job.attempt)
         self.stats.started += 1
@@ -639,6 +684,7 @@ class Scheduler:
         try:
             tasks = await self.client.list_active_tasks(kind="backup", schedule_short_id=sid)
         except ZerobyteError as exc:
+            self.last_start_error = exc
             log_event(ERROR, "api_error", str(exc), action="list_tasks", schedule=sid)
             return None
         task = next((t for t in tasks if str(t.get("id")) not in self.abandoned), None)
@@ -655,6 +701,111 @@ class Scheduler:
         self._adopt(task, reason="already_running")
         self.running[sid].attempt = job.attempt
         return True
+
+    # ---------------------------------------------------------------- web UI
+
+    async def run_next(self, short_id: str) -> ActionResult:
+        """Put a schedule at the head of the queue (it still waits for a free slot)."""
+        async with self.lock:
+            if short_id not in self.table:
+                return ActionResult(False, "no such schedule", 404)
+            if short_id in self.running:
+                return ActionResult(False, "already running", 409)
+            job = next((j for j in self.queue if j.short_id == short_id), None)
+            if job is not None:
+                self.queue.remove(job)
+                job.not_before = 0.0
+            else:
+                job = Job(short_id, "manual", queued_at=self.clock())
+            self.queue.appendleft(job)
+            log_event(
+                INFO,
+                "queued",
+                schedule=short_id,
+                name=self._name(short_id),
+                trigger=job.reason,
+                position=1,
+                source="ui",
+            )
+            self._after_action()
+            return ActionResult(True, "queued first")
+
+    async def run_now(self, short_id: str) -> ActionResult:
+        """Start a backup right away, ignoring MAX_CONCURRENT and other cool-downs."""
+        async with self.lock:
+            if short_id not in self.table:
+                return ActionResult(False, "no such schedule", 404)
+            if short_id in self.running:
+                return ActionResult(False, "already running", 409)
+            now = self.clock()
+            started = await self._start(Job(short_id, "forced", queued_at=now), now)
+            if started is None:
+                self._after_action()
+                return ActionResult(False, f"nothing started: {self.last_start_error}", 502)
+            if not started:
+                self._after_action()
+                error = self.last_start_error
+                if error is None:
+                    return ActionResult(False, "zerobyte says it is already running", 409)
+                return ActionResult(False, str(error), 404 if error.status == 404 else 502)
+            # Started (or adopted): a job still waiting for the same schedule is now moot.
+            for job in [j for j in self.queue if j.short_id == short_id]:
+                self.queue.remove(job)
+                log_event(INFO, "dequeued", schedule=short_id, reason="run_now")
+            self._after_action()
+            run = self.running[short_id]
+            if run.reason == "already_running":
+                return ActionResult(
+                    True, f"already running in zerobyte, watching task {run.task_id}"
+                )
+            return ActionResult(True, f"started task {run.task_id}")
+
+    async def cancel(self, short_id: str) -> ActionResult:
+        """Cancel the active backup of a schedule, or take it out of the queue."""
+        async with self.lock:
+            if short_id not in self.table:
+                return ActionResult(False, "no such schedule", 404)
+            if short_id in self.running:
+                task_id = self.running[short_id].task_id
+            else:
+                queued = [j for j in self.queue if j.short_id == short_id]
+                if queued:
+                    for job in queued:
+                        self.queue.remove(job)
+                    log_event(WARNING, "dequeued", schedule=short_id, reason="ui")
+                    self._after_action()
+                    return ActionResult(True, "removed from the queue")
+                try:
+                    tasks = await self.client.list_active_tasks(schedule_short_id=short_id)
+                except ZerobyteError as exc:
+                    return ActionResult(False, str(exc), 502)
+                tasks = [t for t in tasks if t.get("kind") in self.settings.heavy_task_kinds]
+                if not tasks:
+                    return ActionResult(False, "nothing to cancel", 409)
+                task_id = str(tasks[0].get("id"))
+            try:
+                await self.client.cancel_task(task_id)
+            except NotFound:
+                return ActionResult(False, f"task {task_id} not found in zerobyte", 404)
+            except AlreadyRunning as exc:  # 409: zerobyte says it cannot be cancelled now
+                return ActionResult(False, str(exc), 409)
+            except ZerobyteError as exc:
+                log_event(ERROR, "api_error", str(exc), action="cancel", task=task_id)
+                return ActionResult(False, str(exc), 502)
+            log_event(WARNING, "cancel_requested", schedule=short_id, task=task_id, source="ui")
+            # Our own run stays watched: the next tick logs how it ended.
+            self._after_action()
+            return ActionResult(True, f"cancel requested for task {task_id}")
+
+    async def refresh_now(self) -> list[str]:
+        async with self.lock:
+            problems = await self.refresh()
+            self._after_action()
+            return problems
+
+    def _after_action(self) -> None:
+        self.save_state()
+        self.wake.set()
 
     # ------------------------------------------------------------------- loop
 
@@ -676,14 +827,16 @@ class Scheduler:
     async def run(self, stop: asyncio.Event) -> None:
         """Main loop. In ``once`` mode, returns when the queue is drained."""
         while not stop.is_set():
-            await self.tick()
-            if self.once and self.idle:
-                return
-            if not self.once and self.clock() - self.last_refresh >= self.settings.schedule_refresh:
-                await self.refresh()
-            self.save_state()
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(stop.wait(), timeout=self.sleep_seconds())
+            async with self.lock:
+                self.wake.clear()
+                await self.tick()
+                if self.once and self.idle:
+                    return
+                refresh_due = self.clock() - self.last_refresh >= self.settings.schedule_refresh
+                if not self.once and refresh_due:
+                    await self.refresh()
+                self.save_state()
+            await _wait_any(stop, self.wake, self.sleep_seconds())
 
     def snapshot(self) -> SavedState:
         return SavedState(
@@ -711,3 +864,13 @@ class Scheduler:
             "last_tick": self.last_tick,
             "stats": vars(self.stats),
         }
+
+
+async def _wait_any(first: asyncio.Event, second: asyncio.Event, timeout: float) -> None:
+    """Return when either event is set or after ``timeout`` seconds."""
+    waiters = [asyncio.ensure_future(first.wait()), asyncio.ensure_future(second.wait())]
+    try:
+        await asyncio.wait(waiters, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for waiter in waiters:
+            waiter.cancel()
