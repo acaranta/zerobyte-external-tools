@@ -1,230 +1,339 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark light">
 <title>zbsched</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='3' width='6' height='10' rx='1.5' fill='%232563a8'/%3E%3Crect x='9' y='3' width='6' height='10' rx='1.5' fill='none' stroke='%235b6b7f' stroke-width='1.5'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='3' width='6' height='10' rx='1' fill='%23ff543a'/%3E%3Crect x='9' y='3' width='6' height='10' rx='1' fill='none' stroke='%23a1a1a1' stroke-width='1.5'/%3E%3C/svg%3E">
+<link rel="preload" href="/static/google-sans-code.woff2" as="font" type="font/woff2" crossorigin>
+<script>
+  // Apply the saved theme before the first paint (dark by default, like zerobyte).
+  try { if (localStorage.getItem("zbsched-theme") === "light") document.documentElement.classList.remove("dark"); } catch (_) { /* storage blocked */ }
+</script>
 <style>
+/* Look and feel copied from zerobyte v0.43.1 (app/app.css + shadcn "new-york" components). */
+@font-face {
+  font-family: "Google Sans Code Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 800;
+  src: url("/static/google-sans-code.woff2") format("woff2-variations");
+}
 :root {
-  --paper: #f3f5f7;
-  --panel: #ffffff;
-  --ink: #18212b;
-  --muted: #5b6b7f;
-  --rule: #d5dbe1;
-  --run: #2563a8;
-  --run-soft: #dfeaf6;
-  --queue: #a86a12;
-  --queue-soft: #f7ecd9;
-  --cool: #6b5fa8;
-  --cool-soft: #ebe8f6;
-  --ok: #2f7d4f;
-  --bad: #b42318;
-  --bad-soft: #fbe5e2;
-  --focus: #2563a8;
+  color-scheme: light;
+  --background: oklch(0.98 0.002 250);
+  --foreground: oklch(0.2 0.01 260);
+  --card: #ffffff;
+  --card-header: oklch(0.99 0.001 260);
+  --muted: oklch(0.95 0.005 260);
+  --muted-foreground: oklch(0.45 0.01 260);
+  --accent: oklch(0.96 0.005 260);
+  --border: oklch(0.9 0.01 260);
+  --input: oklch(0.9 0.01 260);
+  --ring: oklch(0.7 0.01 260);
+  --grid: rgba(0, 0, 0, .04);
+  --strong-accent: #ff543a;
+  --destructive: oklch(0.577 0.245 27.325);
+  --success: oklch(0.57 0.16 148);
+  /* slot / state colours: tailwind blue, amber and violet, as zerobyte uses for statuses */
+  --run: #2563eb;
+  --queue: #d97706;
+  --cool: #7c3aed;
+  --shadow: 0 8px 30px -15px rgba(0, 0, 0, .04);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #12171d;
-    --panel: #1a2129;
-    --ink: #e4e9ee;
-    --muted: #93a1b1;
-    --rule: #2d3742;
-    --run: #6aa6e6;
-    --run-soft: #1d3249;
-    --queue: #e0a647;
-    --queue-soft: #3a2d17;
-    --cool: #a99ce6;
-    --cool-soft: #2b2742;
-    --ok: #63c08a;
-    --bad: #f07a6c;
-    --bad-soft: #43201c;
-    --focus: #6aa6e6;
-  }
+:root.dark {
+  color-scheme: dark;
+  --background: #131313;
+  --foreground: oklch(0.985 0 0);
+  --card: #131313;
+  --card-header: #1b1b1b;
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --grid: #262626;
+  --destructive: #ff543a;
+  --success: oklch(0.696 0.17 162.48);
+  --run: #60a5fa;
+  --queue: #fbbf24;
+  --cool: #a78bfa;
+  --shadow: inset 0 0 0 1px rgba(255, 255, 255, .02);
 }
-* { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+* { box-sizing: border-box; border-color: var(--border); }
+html { -webkit-text-size-adjust: 100%; scrollbar-width: thin; }
 body {
   margin: 0;
-  background: var(--paper);
-  color: var(--ink);
-  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  min-height: 100dvh;
+  background: var(--background);
+  color: var(--foreground);
+  font: 14px/1.5 "Google Sans Code Variable", ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums;
 }
-code, .mono { font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace; font-size: 13px; }
-button {
-  font: inherit;
-  font-size: 14px;
-  color: var(--ink);
-  background: var(--panel);
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  padding: 5px 11px;
-  cursor: pointer;
-}
-button:hover:not(:disabled) { border-color: var(--muted); }
-button:disabled { opacity: .4; cursor: default; }
-button.primary { background: var(--run); border-color: var(--run); color: #fff; }
-button.danger:not(:disabled) { color: var(--bad); }
-:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+code, .mono { font-family: inherit; }
+:focus-visible { outline: 2px solid color-mix(in oklab, var(--ring) 70%, transparent); outline-offset: 2px; }
 [hidden] { display: none !important; }
 
-.wrap { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; }
+/* ---- buttons (zerobyte buttonVariants) */
+button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .025em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  color: var(--foreground);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color .15s, color .15s, border-color .15s, transform .1s;
+}
+button:hover:not(:disabled) { background: var(--muted); }
+button:active:not(:disabled) { transform: scale(.98); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--strong-accent); border-color: var(--strong-accent); color: #fff; }
+button.primary:hover:not(:disabled) { background: color-mix(in oklab, var(--strong-accent) 90%, transparent); }
+button.danger:not(:disabled) { color: var(--destructive); border-color: var(--destructive); }
+button.danger:hover:not(:disabled) { background: var(--destructive); color: #fff; }
+button.icon { width: 32px; padding: 0; }
+button svg { width: 16px; height: 16px; flex: none; }
 
-/* ---- header */
-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px; }
-h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
-.health { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--muted); font-size: 13px; flex: 1; }
-.health .bad { color: var(--bad); font-weight: 600; }
+/* ---- top bar (zerobyte layout header) */
+.topbar { position: sticky; top: 0; z-index: 50; height: 65px; background: var(--card-header); border-bottom: 1px solid var(--border); }
+.topbar .in { height: 100%; max-width: 1280px; margin: 0 auto; padding: 0 16px; display: flex; align-items: center; gap: 16px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
+.brand svg { width: 22px; height: 22px; color: var(--strong-accent); }
+.crumb { color: var(--muted-foreground); font-size: 14px; }
+.crumb b { color: var(--foreground); font-weight: 500; }
 .tools { display: flex; gap: 8px; margin-left: auto; }
 
-/* ---- slot rail: the one memorable thing */
-.rail {
-  margin: 22px 0 28px;
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  gap: 16px;
+/* ---- grid background (zerobyte GridBackground) */
+.grid { position: relative; min-height: calc(100dvh - 65px); }
+.grid::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-size: 40px 40px;
+  background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px), linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+  -webkit-mask-image: radial-gradient(ellipse at top, #000 70%, transparent 100%);
+  mask-image: radial-gradient(ellipse at top, #000 70%, transparent 100%);
 }
-.rail h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.wrap { position: relative; max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; display: flex; flex-direction: column; gap: 24px; }
+
+/* ---- card with corner brackets (zerobyte Card) */
+.card { position: relative; background: var(--card); border: 1px solid var(--border); box-shadow: var(--shadow); padding: 24px; }
+.card::before, .card::after {
+  content: ""; position: absolute; inset: -2px; pointer-events: none; opacity: .3;
+  background:
+    linear-gradient(var(--foreground), var(--foreground)) top left / 16px 2px,
+    linear-gradient(var(--foreground), var(--foreground)) top left / 2px 16px,
+    linear-gradient(var(--foreground), var(--foreground)) top right / 16px 2px,
+    linear-gradient(var(--foreground), var(--foreground)) top right / 2px 16px;
+  background-repeat: no-repeat;
+}
+.card::after { transform: scaleY(-1); }
+.card-title { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.2; }
+.card-desc { margin: 4px 0 0; color: var(--muted-foreground); font-size: 13px; }
+.card-desc .hi { color: var(--strong-accent); font-weight: 600; }
+.label { display: block; margin: 0 0 10px; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .02em; color: var(--muted-foreground); }
+
+/* ---- health line */
+.health { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-top: 16px; color: var(--muted-foreground); font-size: 13px; }
+.health span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: var(--border); vertical-align: 1px; }
+.health .ok::before { background: var(--success); }
+.health .bad { color: var(--destructive); font-weight: 600; }
+.health .bad::before { background: var(--destructive); }
+
+/* ---- slot rail */
+.rail { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 32px; margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); }
 .bays { display: flex; flex-wrap: wrap; gap: 10px; }
 .bay {
-  flex: 1 1 210px;
-  min-height: 92px;
-  border-radius: 10px;
+  flex: 1 1 220px;
+  min-height: 96px;
   padding: 12px 14px;
-  background: var(--panel);
-  border: 2px dashed var(--rule);
-  display: flex; flex-direction: column; justify-content: center;
+  border: 1px dashed var(--border);
+  display: flex; flex-direction: column; justify-content: center; gap: 2px;
 }
-.bay.free { color: var(--muted); align-items: center; }
-.bay.taken { border-style: solid; }
-.bay.running { border-color: var(--run); background: var(--run-soft); }
-.bay.external { border-color: var(--queue); background: var(--queue-soft); }
-.bay.cooldown { border-color: var(--cool); background: var(--cool-soft); }
-.bay.over { box-shadow: inset 0 0 0 2px var(--bad); }
-.bay strong { font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
-.bay .what { font-size: 13px; color: var(--muted); }
-.bay .over-note { font-size: 12px; color: var(--bad); font-weight: 600; }
-.bay .bar { height: 3px; margin-top: 8px; border-radius: 2px; background: currentColor; opacity: .25; position: relative; overflow: hidden; }
-.bay.running .bar { color: var(--run); opacity: 1; background: var(--run-soft); }
-.bay.running .bar::after {
+.bay.free { color: var(--muted-foreground); align-items: center; text-transform: uppercase; font-size: 12px; letter-spacing: .05em; }
+.bay.taken { border-style: solid; border-left-width: 3px; }
+.bay.running { border-left-color: var(--run); background: color-mix(in oklab, var(--run) 8%, transparent); }
+.bay.external { border-left-color: var(--queue); background: color-mix(in oklab, var(--queue) 8%, transparent); }
+.bay.cooldown { border-left-color: var(--cool); background: color-mix(in oklab, var(--cool) 8%, transparent); }
+.bay.over { border-color: var(--destructive); }
+.bay strong { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.bay .what { font-size: 12px; color: var(--muted-foreground); }
+.bay .over-note { font-size: 11px; color: var(--destructive); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.bay .bar { height: 6px; margin-top: 8px; border-radius: 999px; background: color-mix(in oklab, var(--foreground) 15%, transparent); position: relative; overflow: hidden; }
+.bay .bar::after {
   content: ""; position: absolute; inset: 0; width: 30%;
-  background: var(--run); border-radius: 2px;
+  background: var(--foreground); border-radius: 999px;
   animation: sweep 2.4s ease-in-out infinite;
 }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
-@media (prefers-reduced-motion: reduce) { .bay.running .bar::after { animation: none; width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .bay .bar::after { animation: none; width: 100%; } }
 
 .line { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.line li {
-  display: flex; align-items: center; gap: 10px;
-  padding: 7px 12px; border-radius: 8px;
-  background: var(--panel); border-left: 4px solid var(--queue);
-}
-.line .pos { font-weight: 700; color: var(--queue); min-width: 1.4em; }
-.line .name { flex: 1; overflow-wrap: anywhere; }
-.line .why { font-size: 12px; color: var(--muted); }
-.line .empty { border-left-color: var(--rule); color: var(--muted); }
+.line li { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid var(--border); }
+.line .pos { font-weight: 700; color: var(--strong-accent); min-width: 1.6em; }
+.line .name { flex: 1; overflow-wrap: anywhere; font-weight: 600; }
+.line .why { font-size: 12px; color: var(--muted-foreground); }
+.line .empty { color: var(--muted-foreground); border-style: dashed; }
 
-/* ---- schedule table */
-table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 10px; overflow: hidden; }
-th { text-align: left; font-size: 13px; font-weight: 600; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--rule); }
-td { padding: 10px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+/* ---- schedule table (zerobyte Table) */
+.table-card { padding: 0; }
+.table-card .head { padding: 24px 24px 16px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .02em; color: var(--muted-foreground); padding: 10px 12px; border-bottom: 1px solid var(--border); border-top: 1px solid var(--border); white-space: nowrap; }
+th:first-child, td:first-child { padding-left: 24px; }
+th:last-child, td:last-child { padding-right: 24px; }
+td { padding: 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+tbody tr { transition: background-color .15s; }
+tbody tr:hover { background: color-mix(in oklab, var(--muted) 50%, transparent); }
 tr:last-child td { border-bottom: 0; }
-td .sub { display: block; font-size: 12px; color: var(--muted); }
-.sname { font-weight: 600; }
-.warn { display: inline-block; margin-top: 3px; font-size: 12px; color: var(--bad); font-weight: 600; }
-.state { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; font-weight: 600; white-space: nowrap; }
-.state.running { background: var(--run-soft); color: var(--run); }
-.state.queued { background: var(--queue-soft); color: var(--queue); }
-.state.busy_external { background: var(--queue-soft); color: var(--queue); }
-.state.cooldown { background: var(--cool-soft); color: var(--cool); }
-.state.idle { color: var(--muted); padding-left: 0; }
-.result.succeeded, .result.success { color: var(--ok); }
-.result.failed, .result.timeout, .result.error, .result.unknown, .result.stale { color: var(--bad); }
+td .sub { display: block; font-size: 12px; color: var(--muted-foreground); }
+.sname { font-weight: 700; }
+.warn { display: inline-block; margin-top: 4px; padding: 1px 8px; border: 1px solid color-mix(in oklab, var(--destructive) 30%, transparent); background: color-mix(in oklab, var(--destructive) 10%, transparent); border-radius: 999px; font-size: 11px; color: var(--destructive); font-weight: 600; }
+.cron { display: inline-block; padding: 2px 8px; border-radius: 6px; background: var(--muted); font-weight: 600; white-space: nowrap; }
+.state { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid transparent; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.state.running { color: var(--run); background: color-mix(in oklab, var(--run) 15%, transparent); border-color: color-mix(in oklab, var(--run) 30%, transparent); }
+.state.queued, .state.busy_external { color: var(--queue); background: color-mix(in oklab, var(--queue) 15%, transparent); border-color: color-mix(in oklab, var(--queue) 30%, transparent); }
+.state.cooldown { color: var(--cool); background: color-mix(in oklab, var(--cool) 15%, transparent); border-color: color-mix(in oklab, var(--cool) 30%, transparent); }
+.state.idle { color: var(--muted-foreground); border-color: var(--border); }
+.result { font-weight: 600; }
+.result::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: var(--muted-foreground); vertical-align: 1px; }
+.result.succeeded, .result.success { color: var(--success); }
+.result.succeeded::before, .result.success::before { background: #10b981; }
+.result.failed, .result.timeout, .result.error, .result.unknown, .result.stale { color: var(--destructive); }
+.result.failed::before, .result.timeout::before, .result.error::before, .result.unknown::before, .result.stale::before { background: #ef4444; }
 .result.cancelled, .result.warning { color: var(--queue); }
-.err { display: block; font-size: 12px; color: var(--muted); max-width: 34ch; overflow-wrap: anywhere; }
+.result.cancelled::before, .result.warning::before { background: #f59e0b; }
+.err { display: block; margin-top: 4px; font-size: 12px; color: var(--muted-foreground); max-width: 38ch; overflow-wrap: anywhere; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.empty-table { padding: 28px; text-align: center; color: var(--muted); }
+.empty-table { padding: 32px; text-align: center; color: var(--muted-foreground); }
 
 /* ---- login */
-.login { max-width: 360px; margin: 14vh auto 0; padding: 0 16px; }
-.login h1 { margin-bottom: 4px; }
-.login p { color: var(--muted); margin: 0 0 20px; }
-.login label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.login-page { position: relative; min-height: 100dvh; display: flex; align-items: flex-start; justify-content: center; padding: 14vh 16px 0; }
+.login { position: relative; width: 100%; max-width: 400px; }
+.login .brand { margin-bottom: 20px; }
+.login label { display: block; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .02em; color: var(--muted-foreground); margin: 20px 0 8px; }
 .login input {
-  width: 100%; font: inherit; padding: 9px 11px; border-radius: 6px;
-  border: 1px solid var(--rule); background: var(--panel); color: var(--ink);
+  width: 100%; height: 36px; font: inherit; padding: 4px 12px; border-radius: 6px;
+  border: 1px solid var(--input); background: transparent; color: var(--foreground);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .05);
 }
-.login button { margin-top: 12px; width: 100%; padding: 9px; }
-.login .msg { color: var(--bad); font-size: 14px; min-height: 1.5em; margin-top: 10px; }
+.login input:focus-visible { outline: none; border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent); }
+.login button { margin-top: 16px; width: 100%; height: 36px; }
+.login .msg { color: var(--destructive); font-size: 13px; min-height: 1.5em; margin-top: 10px; }
 
-/* ---- toast */
+/* ---- toast (zerobyte sonner) */
 #toast {
-  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
-  max-width: min(560px, calc(100vw - 32px));
-  background: var(--ink); color: var(--paper);
-  padding: 10px 16px; border-radius: 8px; font-size: 14px;
+  position: fixed; right: 16px; bottom: 16px; z-index: 100;
+  max-width: min(420px, calc(100vw - 32px));
+  background: var(--card-header); color: var(--foreground);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 16px; font-size: 13px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
 }
-#toast.bad { background: var(--bad); color: #fff; }
+#toast.bad { border-color: color-mix(in oklab, var(--destructive) 50%, transparent); color: var(--destructive); }
+
+/* ---- theme toggle: show the icon of the theme you would switch to */
+#theme .sun { display: none; }
+.dark #theme .sun { display: block; }
+.dark #theme .moon { display: none; }
 
 @media (max-width: 760px) {
-  .rail { grid-template-columns: minmax(0, 1fr); }
-  .tools { margin-left: 0; }
-  .health { flex-basis: 100%; order: 3; }
+  .topbar .in { gap: 10px; }
+  .crumb { display: none; }
+  .tools .label-long { display: none; }
+  .card { padding: 16px; }
+  .rail { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .table-card { padding: 0; }
+  .table-card .head { padding: 16px 16px 12px; }
   thead { display: none; }
   table, tbody, tr, td { display: block; }
-  tr { border-bottom: 1px solid var(--rule); padding: 8px 0; }
-  tr:last-child { border-bottom: 0; }
-  td { border: 0; padding: 4px 14px; }
-  td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); }
+  tr { border-top: 1px solid var(--border); padding: 8px 0; }
+  td, td:first-child, td:last-child { border: 0; padding: 4px 16px; }
+  td[data-label]::before { content: attr(data-label); display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .02em; color: var(--muted-foreground); }
   .actions { justify-content: flex-start; padding-top: 6px; }
 }
 </style>
 </head>
 <body>
 
-<section class="login" id="login" hidden>
-  <h1>zbsched</h1>
-  <p>Enter the scheduler key to see and control the backup queue.</p>
-  <form id="login-form">
-    <label for="key">Scheduler key</label>
-    <input id="key" name="key" type="password" autocomplete="current-password" required>
-    <button class="primary" type="submit">Sign in</button>
-    <div class="msg" id="login-msg" role="alert"></div>
-  </form>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- lucide "calendar-clock" (zerobyte's Backups icon), "sun", "moon" -->
+  <symbol id="i-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h5"/><path d="M17.5 17.5 16 16.3V14"/><circle cx="16" cy="16" r="6"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+</svg>
+
+<section class="login-page grid" id="login" hidden>
+  <div class="login card">
+    <div class="brand"><svg aria-hidden="true"><use href="#i-logo"/></svg>zbsched</div>
+    <h1 class="card-title">Sign in</h1>
+    <p class="card-desc">Enter the scheduler key to see and control the backup queue.</p>
+    <form id="login-form">
+      <label for="key">Scheduler key</label>
+      <input id="key" name="key" type="password" autocomplete="current-password" required>
+      <button class="primary" type="submit">Sign in</button>
+      <div class="msg" id="login-msg" role="alert"></div>
+    </form>
+  </div>
 </section>
 
-<main class="wrap" id="app" hidden>
-  <header>
-    <h1>Backup queue</h1>
-    <div class="health" id="health"></div>
-    <div class="tools">
-      <button id="refresh" type="button" title="Reload the schedule list from zerobyte now">Refresh schedules</button>
-      <button id="logout" type="button">Log out</button>
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="in">
+      <div class="brand"><svg aria-hidden="true"><use href="#i-logo"/></svg>zbsched</div>
+      <div class="crumb">Scheduler <span aria-hidden="true">›</span> <b>Backup queue</b></div>
+      <div class="tools">
+        <button id="theme" class="icon" type="button" title="Switch between light and dark theme" aria-label="Switch theme">
+          <svg class="sun" aria-hidden="true"><use href="#i-sun"/></svg>
+          <svg class="moon" aria-hidden="true"><use href="#i-moon"/></svg>
+        </button>
+        <button id="refresh" type="button" title="Reload the schedule list from zerobyte now">Refresh<span class="label-long">&nbsp;schedules</span></button>
+        <button id="logout" type="button">Logout</button>
+      </div>
     </div>
   </header>
 
-  <section class="rail">
-    <div>
-      <h2 id="bays-title">Slots</h2>
-      <div class="bays" id="bays"></div>
-    </div>
-    <div>
-      <h2>Waiting</h2>
-      <ol class="line" id="line"></ol>
-    </div>
-  </section>
+  <main class="grid">
+    <div class="wrap">
+      <section class="card">
+        <h1 class="card-title">Backup queue</h1>
+        <p class="card-desc">Schedules started by <span class="hi">zbsched</span> through the zerobyte API, at most <span id="limit">…</span> at a time.</p>
+        <div class="health" id="health"></div>
+        <div class="rail">
+          <div>
+            <h2 class="label" id="bays-title">Slots</h2>
+            <div class="bays" id="bays"></div>
+          </div>
+          <div>
+            <h2 class="label">Waiting</h2>
+            <ol class="line" id="line"></ol>
+          </div>
+        </div>
+      </section>
 
-  <table>
-    <thead>
-      <tr><th>Schedule</th><th>Cron</th><th>Next run</th><th>State</th><th>Last backup</th><th><span hidden>Actions</span></th></tr>
-    </thead>
-    <tbody id="rows"></tbody>
-  </table>
-</main>
+      <section class="card table-card">
+        <div class="head">
+          <h2 class="card-title">Schedules</h2>
+          <p class="card-desc">Disabled in zerobyte, run on these cron expressions.</p>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Schedule</th><th>Cron</th><th>Next run</th><th>State</th><th>Last backup</th><th><span hidden>Actions</span></th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </section>
+    </div>
+  </main>
+</div>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 
@@ -310,7 +419,7 @@ function showLogin(message) {
 
 function renderHealth(s) {
   $("health").replaceChildren(...[
-    el("span", { class: s.api_ok ? "" : "bad", text: s.api_ok ? "zerobyte reachable" : "zerobyte unreachable" }),
+    el("span", { class: s.api_ok ? "ok" : "bad", text: s.api_ok ? "zerobyte reachable" : "zerobyte unreachable" }),
     s.state_ok === false ? el("span", { class: "bad", text: "state file not writable" }) : null,
     el("span", { text: s.last_tick ? `checked ${span(nowS() - s.last_tick)} ago` : "not checked yet" }),
     s.last_refresh ? el("span", { text: `schedules loaded ${span(nowS() - s.last_refresh)} ago` }) : null,
@@ -430,7 +539,7 @@ function renderRows(s) {
       el("span", { class: "sub mono", text: r.short_id }),
       r.enabled_in_zerobyte ? el("span", { class: "warn", title: "zerobyte will also run it on its own", text: "Still enabled in zerobyte" }) : null,
     ),
-    el("td", { "data-label": "Cron" }, el("code", { text: r.cron }), r.source === "file" ? el("span", { class: "sub", text: "from schedules file" }) : null),
+    el("td", { "data-label": "Cron" }, el("code", { class: "cron", text: r.cron }), r.source === "file" ? el("span", { class: "sub", text: "from schedules file" }) : null),
     el("td", { "data-label": "Next run", text: nextRun(r.next_run) }),
     el("td", { "data-label": "State" }, stateCell(r)),
     el("td", { "data-label": "Last backup" }, lastCell(r)),
@@ -443,6 +552,7 @@ function render(s) {
   lastStatus = s;
   offset = s.now - Date.now() / 1000;
   tz = s.tz;
+  $("limit").textContent = String(s.max_concurrent);
   renderHealth(s);
   renderBays(s);
   renderLine(s);
@@ -498,6 +608,11 @@ $("refresh").addEventListener("click", async () => {
     button.disabled = false;
     poll();
   }
+});
+
+$("theme").addEventListener("click", () => {
+  const dark = document.documentElement.classList.toggle("dark");
+  try { localStorage.setItem("zbsched-theme", dark ? "dark" : "light"); } catch (_) { /* storage blocked */ }
 });
 
 $("logout").addEventListener("click", async () => {

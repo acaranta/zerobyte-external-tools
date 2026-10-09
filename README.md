@@ -214,6 +214,12 @@ to it is the queue, in order. Below, one row per schedule: cron, next run, state
 result, and a warning if the schedule is still enabled in zerobyte. The page refreshes
 every 5 seconds, from the scheduler's memory only: it makes no zerobyte API call.
 
+The page uses zerobyte's look (colours, cards, buttons and its *Google Sans Code* font),
+dark by default; the sun/moon button switches to the light theme and the browser
+remembers the choice. The font is bundled (`src/zbsched/static/google-sans-code.woff2`,
+SIL Open Font License 1.1, see `google-sans-code-OFL.txt` next to it) and served at
+`/static/google-sans-code.woff2`, so the page loads nothing from outside.
+
 | Button | Effect |
 |---|---|
 | **Refresh schedules** | reload the schedule list from zerobyte and the schedules file now. On an error the previous list is kept and the problem is shown |

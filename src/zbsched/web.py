@@ -37,12 +37,14 @@ SESSION_MAX_AGE = 7 * 24 * 3600
 LOGIN_FAILURE_DELAY = 1.0
 MAX_BODY_BYTES = 4096
 CSRF_HEADER = "X-Zbsched"
-OPEN_PATHS = frozenset({"/healthz", "/", "/api/login"})
+FONT_PATH = "/static/google-sans-code.woff2"
+OPEN_PATHS = frozenset({"/healthz", "/", "/api/login", FONT_PATH})
 
 SETTINGS_KEY = web.AppKey("settings", Settings)
 SCHEDULER_KEY = web.AppKey("scheduler", Scheduler)
 HEALTH_KEY = web.AppKey("health", StatusFn)  # type: ignore[arg-type]
 PAGE_KEY = web.AppKey("page", bytes)
+FONT_KEY = web.AppKey("font", bytes)
 
 
 def _sign(key: str, issued: int) -> str:
@@ -116,12 +118,21 @@ async def index(request: web.Request) -> web.Response:
             "Cache-Control": "no-store",
             "Content-Security-Policy": (
                 "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-                "connect-src 'self'; img-src 'self' data:; form-action 'self'; "
+                "connect-src 'self'; img-src 'self' data:; font-src 'self'; form-action 'self'; "
                 "frame-ancestors 'none'; base-uri 'none'"
             ),
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "no-referrer",
         },
+    )
+
+
+async def font(request: web.Request) -> web.Response:
+    # The only static file: the page's typeface, the one zerobyte uses (SIL OFL 1.1).
+    return web.Response(
+        body=request.app[FONT_KEY],
+        content_type="font/woff2",
+        headers={"Cache-Control": "public, max-age=604800", "X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -319,14 +330,20 @@ def load_page() -> bytes:
     return (resources.files("zbsched") / "static" / "index.html").read_bytes()
 
 
+def load_font() -> bytes:
+    return (resources.files("zbsched") / "static" / "google-sans-code.woff2").read_bytes()
+
+
 def make_app(settings: Settings, scheduler: Scheduler, health: StatusFn) -> web.Application:
     app = web.Application(middlewares=[_auth], client_max_size=MAX_BODY_BYTES)
     app[SETTINGS_KEY] = settings
     app[SCHEDULER_KEY] = scheduler
     app[HEALTH_KEY] = health
     app[PAGE_KEY] = load_page()
+    app[FONT_KEY] = load_font()
     app.router.add_get("/healthz", healthz)
     app.router.add_get("/", index)
+    app.router.add_get(FONT_PATH, font)
     app.router.add_post("/api/login", login)
     app.router.add_post("/api/logout", logout)
     app.router.add_get("/api/status", status)

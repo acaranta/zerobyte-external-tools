@@ -89,6 +89,18 @@ async def test_page_is_served_without_auth_and_holds_no_data(serve):
     assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
     assert "<title>zbsched</title>" in r.text
     assert "A" not in r.text.split("<body>")[1].split("<script>")[0].split()  # no schedule name
+    assert "font-src 'self'" in r.headers["content-security-policy"]
+
+
+async def test_font_is_served_without_auth(serve):
+    _, _, _, http = await serve([sched("a")])
+    r = await http.get("/static/google-sans-code.woff2")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "font/woff2"
+    assert r.content[:4] == b"wOF2"
+    assert (await http.get("/static/index.html")).status_code == 401  # no generic file serving
+    _, _, _, http = await serve([sched("a")], ui_key=None)
+    assert (await http.get("/static/google-sans-code.woff2")).status_code == 404
 
 
 async def test_api_requires_auth(serve):
