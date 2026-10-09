@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 import respx
@@ -119,3 +121,55 @@ async def test_task_history_bad_shape(client):
     respx.get(f"{BASE}/api/v1/tasks/history").respond(json=[])
     with pytest.raises(ZerobyteError, match="history"):
         await client.list_task_history(kind="backup")
+
+
+SCHEDULE = {
+    "shortId": "a",
+    "repositoryId": "repo-int-id",
+    "cronExpression": "0 2 * * *",
+    "enabled": False,
+    "maxRetries": 5,
+    "retryDelay": 30,
+    "retentionPolicy": {"keepDaily": 7, "keepWithinDuration": "1y"},
+}
+
+
+@respx.mock
+async def test_update_schedule_sends_the_required_and_retry_fields(client):
+    respx.get(f"{BASE}/api/v1/backups/a").respond(json=SCHEDULE)
+    patch = respx.patch(f"{BASE}/api/v1/backups/a").respond(json={**SCHEDULE, "enabled": True})
+    result = await client.update_schedule("a", {"enabled": True})
+    assert result["enabled"] is True
+    assert json.loads(patch.calls.last.request.content) == {
+        "repositoryId": "repo-int-id",
+        "cronExpression": "0 2 * * *",
+        "maxRetries": 5,  # left out, zerobyte would reset them to 2 / 15
+        "retryDelay": 30,
+        "enabled": True,
+    }
+
+
+@respx.mock
+async def test_update_schedule_with_a_function_of_the_current_values(client):
+    respx.get(f"{BASE}/api/v1/backups/a").respond(json=SCHEDULE)
+    patch = respx.patch(f"{BASE}/api/v1/backups/a").respond(json=SCHEDULE)
+    await client.update_schedule(
+        "a", lambda cur: {"retentionPolicy": {**cur["retentionPolicy"], "keepWeekly": 4}}
+    )
+    body = json.loads(patch.calls.last.request.content)
+    assert body["retentionPolicy"] == {"keepDaily": 7, "keepWeekly": 4, "keepWithinDuration": "1y"}
+
+
+@respx.mock
+async def test_update_schedule_errors(client):
+    respx.get(f"{BASE}/api/v1/backups/x").respond(
+        404, json={"message": "Backup schedule not found"}
+    )
+    with pytest.raises(NotFound):
+        await client.update_schedule("x", {"enabled": True})
+    respx.get(f"{BASE}/api/v1/backups/a").respond(json={**SCHEDULE, "cronExpression": ""})
+    respx.patch(f"{BASE}/api/v1/backups/a").respond(
+        400, json={"message": "Enabled schedules require a cron expression"}
+    )
+    with pytest.raises(ZerobyteError, match="require a cron expression"):
+        await client.update_schedule("a", {"enabled": True})

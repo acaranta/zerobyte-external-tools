@@ -102,6 +102,17 @@ async def test_queue_order_survives_restart(world):
     assert s2.stats.succeeded == 1  # resumed run is ours, unlike an adopted one
 
 
+async def test_restored_cron_job_dropped_when_handed_to_zerobyte(world):
+    w = world([sched("a"), sched("b"), sched("c", cron="0 4 * * *")])
+    s = await w.start()
+    await w.tick(s, 30)  # a runs, b waits on cron
+    await s.run_next("c")  # a manual request survives the hand-over, cron jobs do not
+    active = [{**sched(x), "enabled": True} for x in ("b", "c")]
+    w.fake.schedules = [sched("a"), *active]
+    s2 = await w.start()
+    assert [(j.short_id, j.reason) for j in s2.queue] == [("c", "manual")]
+
+
 async def test_resumed_run_keeps_start_time_and_timeout(world):
     w = world([sched("a")], TASK_TIMEOUT_HOURS=1, RETRY_COUNT=2)
     s = await w.start()

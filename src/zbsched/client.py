@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -111,6 +112,38 @@ class ZerobyteClient:
         if not isinstance(body, list):
             raise ZerobyteError("GET /api/v1/backups: expected a list")
         return body
+
+    async def get_schedule(self, short_id: str) -> dict[str, Any]:
+        body = await self._json("GET", f"/api/v1/backups/{short_id}")
+        if not isinstance(body, dict):
+            raise ZerobyteError(f"GET /api/v1/backups/{short_id}: expected an object")
+        return body
+
+    async def update_schedule(
+        self,
+        short_id: str,
+        changes: dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Change some fields of a schedule (e.g. ``enabled``, ``retentionPolicy``).
+
+        zerobyte has no partial update: PATCH requires ``repositoryId`` and
+        ``cronExpression``, and resets ``maxRetries`` / ``retryDelay`` to their defaults
+        when they are left out. So read the schedule first and send those back as they are.
+        ``changes`` may be a function of the current schedule, to merge into its values.
+        """
+        current = await self.get_schedule(short_id)
+        if callable(changes):
+            changes = changes(current)
+        body: dict[str, Any] = {
+            "repositoryId": current.get("repositoryId"),
+            "cronExpression": current.get("cronExpression") or "",
+        }
+        for keep in ("maxRetries", "retryDelay"):  # retryDelay is in minutes both ways
+            if current.get(keep) is not None:
+                body[keep] = current[keep]
+        body.update(changes)
+        result = await self._json("PATCH", f"/api/v1/backups/{short_id}", json=body)
+        return result if isinstance(result, dict) else {}
 
     async def run_backup(self, short_id: str) -> str:
         """Start a manual backup and return its task id."""

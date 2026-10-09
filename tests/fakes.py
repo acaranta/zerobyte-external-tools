@@ -28,6 +28,8 @@ class FakeZerobyte:
         self.run_calls: list[str] = []
         self.cancelled: list[str] = []
         self.run_errors: dict[str, Exception] = {}
+        self.update_errors: dict[str, Exception] = {}
+        self.updates: list[tuple[str, dict[str, Any]]] = []
         self.down = False
         self.forget_after_backup = False
         self.history_calls: list[tuple[str, int]] = []
@@ -90,6 +92,31 @@ class FakeZerobyte:
     async def list_schedules(self) -> list[dict[str, Any]]:
         self._check()
         return [dict(s) for s in self.schedules]
+
+    async def get_schedule(self, short_id: str) -> dict[str, Any]:
+        self._check()
+        for sched in self.schedules:
+            if sched["shortId"] == short_id:
+                return dict(sched)
+        raise NotFound(f"GET /api/v1/backups/{short_id}: HTTP 404 Backup schedule not found", 404)
+
+    async def update_schedule(self, short_id: str, changes: Any) -> dict[str, Any]:
+        """Same rules as zerobyte's PATCH: an enabled schedule needs a cron; {} clears."""
+        current = await self.get_schedule(short_id)
+        if callable(changes):
+            changes = changes(current)
+        if short_id in self.update_errors:
+            raise self.update_errors[short_id]
+        merged = {**current, **changes}
+        if merged.get("enabled") and not merged.get("cronExpression"):
+            raise ZerobyteError("HTTP 400 Enabled schedules require a cron expression", 400)
+        if merged.get("retentionPolicy") == {}:
+            merged["retentionPolicy"] = None
+        self.updates.append((short_id, dict(changes)))
+        for i, sched in enumerate(self.schedules):
+            if sched["shortId"] == short_id:
+                self.schedules[i] = merged
+        return merged
 
     async def run_backup(self, short_id: str) -> str:
         self._check()

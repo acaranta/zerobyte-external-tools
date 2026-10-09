@@ -311,12 +311,50 @@ async def test_bootstrap_fails_fast_when_down(make):
         await s.bootstrap()
 
 
-async def test_still_enabled_warning(make, caplog):
+def events(caplog, name):
+    return [r.fields.get("schedule") for r in caplog.records if getattr(r, "event", None) == name]
+
+
+async def test_schedule_active_in_zerobyte_is_left_to_zerobyte(make, caplog):
     caplog.set_level(logging.INFO, logger="zbsched")
-    s, _, _ = make([sched("a", enabled=True), sched("b")])
+    s, fake, clock = make([sched("a", enabled=True, last=None), sched("b")])
     await s.bootstrap()
-    warned = [r for r in caplog.records if getattr(r, "event", None) == "still_enabled"]
-    assert [r.fields["schedule"] for r in warned] == ["a"]
+    assert events(caplog, "left_to_zerobyte") == ["a"]
+    assert "a" in s.table and "a" not in s.next_fires
+    assert s.owned() == ["b"]
+    assert [j.short_id for j in s.queue] == []  # never backed up, but not caught up
+    await fire(s, clock)
+    assert fake.run_calls == ["b"]  # cron fired for b only
+
+
+async def test_handover_to_zerobyte_and_back(make, caplog):
+    caplog.set_level(logging.INFO, logger="zbsched")
+    s, fake, clock = make([sched("a"), sched("b")])
+    await s.bootstrap()
+    await fire(s, clock)
+    assert fake.run_calls == ["a"]
+    assert [j.short_id for j in s.queue] == ["b"]
+
+    fake.schedules = [sched("a", enabled=True), sched("b", enabled=True)]
+    await s.refresh()
+    assert events(caplog, "handed_to_zerobyte") == ["a", "b"]
+    assert list(s.queue) == []  # b dequeued
+    assert "a" in s.running  # the running backup is still watched
+    assert s.next_fires == {}
+
+    fake.schedules = [sched("a"), sched("b")]
+    await s.refresh()
+    assert events(caplog, "taken_from_zerobyte") == ["a", "b"]
+    assert set(s.next_fires) == {"a", "b"}
+
+
+async def test_schedules_file_conflict_warns(make, tmp_path, caplog):
+    caplog.set_level(logging.INFO, logger="zbsched")
+    (tmp_path / "s.yml").write_text("schedules:\n  - id: a\n    cron: '0 5 * * *'\n")
+    s, _, _ = make([sched("a", enabled=True)], SCHEDULES_FILE=tmp_path / "s.yml")
+    await s.bootstrap()
+    assert events(caplog, "schedule_file_conflict") == ["a"]
+    assert "a" not in s.next_fires
 
 
 async def test_refresh_adds_changes_and_removes(make):

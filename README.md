@@ -23,9 +23,12 @@ restic or the repositories.
 
 ## How it works
 
-- You **disable** every schedule in zerobyte so its built-in scheduler skips them.
-  A *manual* run still works on a disabled schedule, and that is what this service
-  triggers (`POST /api/v1/backups/:shortId/run`).
+- Each zerobyte schedule is run by **one** scheduler, chosen by its toggle in zerobyte:
+  **Paused** (`enabled: false`) → this service runs it on its cron; **Active**
+  (`enabled: true`) → zerobyte runs it and this service leaves it alone. A *manual*
+  run still works on a paused schedule, and that is what this service triggers
+  (`POST /api/v1/backups/:shortId/run`). The web interface's
+  [Backups](#backups-pane) pane switches schedules between the two.
 - When schedules come due they enter a FIFO queue. A schedule is never queued twice.
   If it is still queued or running when it comes due again, that run is skipped and
   logged (`event=skip`).
@@ -35,7 +38,7 @@ restic or the repositories.
   `COOLDOWN_SECONDS` once no task is active for that schedule any more, so zerobyte's
   background `restic stats` (invisible to the API) can finish.
 - **Startup:** checks `/api/healthcheck` and the API key and fails fast if either
-  fails. Warns about schedules still enabled in zerobyte. Restores the saved state and
+  fails. Logs the schedules left to zerobyte (`event=left_to_zerobyte`). Restores the saved state and
   reconciles it with zerobyte (see [Restarts and state](#restarts-and-state)), adopts
   backups that are already running, then **catches up once**: a schedule whose last
   cron time has passed since its `lastBackupAt` is queued one time.
@@ -134,11 +137,12 @@ scheduler starts from what zerobyte reports. A failing save is logged once, retr
 every loop, and shown as `state_ok: false` in `/healthz`. `--once` and `--check` never
 read or write the file. Do not share one state file between two instances.
 
-## Disabling zerobyte's own schedules
+## Handing schedules to this service
 
-In the zerobyte UI, open each backup schedule and switch its toggle from **Enabled** to
-**Paused**. The cron expression stays stored, so `SCHEDULE_SOURCE=zerobyte` keeps using
-it.
+Pause zerobyte's own scheduling for each backup this service should run: from the
+[Backups](#backups-pane) pane (select them, then **Pause**), or in the zerobyte UI by
+switching the schedule's toggle from **Enabled** to **Paused**. The cron expression
+stays stored, so `SCHEDULE_SOURCE=zerobyte` keeps using it.
 
 Then check that everything is in order without starting anything:
 
@@ -147,13 +151,15 @@ docker compose run --rm zerobyte-scheduler --check
 ```
 
 ```
-SHORT_ID  NAME    CRON        SOURCE    NEXT_RUN               ZEROBYTE
-abc123    Photos  0 3 * * *   zerobyte  2026-10-08 03:00 CEST  disabled
-def456    Docs    30 1 * * *  file      2026-10-08 01:30 CEST  ENABLED (disable it!)
+SHORT_ID  NAME    CRON        SOURCE    NEXT_RUN               RUN_BY
+abc123    Photos  0 3 * * *   zerobyte  2026-10-08 03:00 CEST  zbsched
+def456    Docs    30 1 * * *  zerobyte  -                      zerobyte
 ```
 
-Every schedule still enabled is also logged as `event=still_enabled` at each start,
-because zerobyte would run it as well, which defeats the purpose.
+`RUN_BY zerobyte` schedules are active in zerobyte: this service never queues them on
+cron (`--once all` skips them too, `--once <id>` still runs them on request). A
+schedule listed in `SCHEDULES_FILE` but active in zerobyte is left to zerobyte with a
+warning (`event=schedule_file_conflict`).
 
 > When upgrading zerobyte, check again that a manual run still works on a disabled
 > schedule (`validateBackupExecution()` only skips disabled schedules for non-manual
@@ -211,12 +217,12 @@ The top of the page shows the **slots**: one box per `MAX_CONCURRENT` slot, take
 running backup, a task started outside the scheduler, or a cool-down. A backup started
 with *Run now* beyond the limit appears as an extra box marked *Over the limit*. Next
 to it is the queue, in order. Below, one row per schedule: cron, next run, state, last
-result, and a warning if the schedule is still enabled in zerobyte. The page refreshes
+result, and "Run by zerobyte" for schedules active in zerobyte. The page refreshes
 every 5 seconds, from the scheduler's memory only: it makes no zerobyte API call.
 
 The page uses zerobyte's look (colours, cards, buttons and its *Google Sans Code* font),
-dark by default, with the same sidebar: **Scheduler** is its first section
-(`#/scheduler`). The panel button in the top bar (or Ctrl+B) collapses the sidebar to
+dark by default, with the same sidebar: **Scheduler** (`#/scheduler`, the queue) and
+**Backups** (`#/backups`, zerobyte's schedules). The panel button in the top bar (or Ctrl+B) collapses the sidebar to
 icons; on a phone it opens it as a drawer. The sidebar footer holds the light/dark
 switch and *Log out*. The browser remembers the theme and the sidebar state. The font is bundled (`src/zbsched/static/google-sans-code.woff2`,
 SIL Open Font License 1.1, see `google-sans-code-OFL.txt` next to it) and served at
@@ -245,7 +251,37 @@ curl -X POST -H "x-api-key: $SCHEDULER_API_KEY" -H 'X-Zbsched: 1' \
 curl -X POST -H "x-api-key: $SCHEDULER_API_KEY" -H 'X-Zbsched: 1' http://localhost:8080/api/refresh
 ```
 
-**Security.** The interface can start and cancel backups, so:
+### Backups pane
+
+The **Backups** sidebar section (`#/backups`) lists every backup schedule configured in
+zerobyte (a live call, refreshed by **Reload** and after each change): volume →
+repository, zerobyte scheduling, cron, retention policy and last backup.
+
+- **Scheduling switch** (`ACTIVE` / `PAUSED`): one click changes it in zerobyte and
+  hands the backup over (active → run by zerobyte, paused → run by this service). The
+  scheduler reloads its list at once. A schedule without cron ("Manual only") cannot be
+  activated.
+- **Checkboxes**, *Select all / none*, then **Activate** / **Pause** (with
+  confirmation) or **Edit retention** for the selection. Each backup is updated on its
+  own; failures are reported per backup and do not stop the others.
+- **Edit retention** opens zerobyte's *Retention policy* form (keep last / hourly /
+  daily / weekly / monthly / yearly; empty = no rule). For one backup the form holds
+  its policy and saving writes exactly that. For several, a field shows the common
+  value or *mixed*, only the fields you change are applied, and **×** removes a rule on
+  all of them. `keepWithinDuration` (not in zerobyte's form either) is never touched.
+  A new policy applies at that backup's next successful run (zerobyte's `forget`).
+
+zerobyte has no partial update: every change is a `GET` of the schedule then a
+`PATCH /api/v1/backups/:shortId` that sends back its `repositoryId`, `cronExpression`,
+`maxRetries` and `retryDelay` (zerobyte would reset the last two otherwise). Check this
+again when upgrading zerobyte.
+
+The JSON routes: `GET /api/backups`, `POST /api/backups/scheduling`
+`{"ids": [...], "enabled": true}`, `POST /api/backups/retention`
+`{"ids": [...], "set": {"keepDaily": 7}, "clear": ["keepLast"]}`.
+
+**Security.** The interface can start and cancel backups and change zerobyte's
+schedules, so:
 
 - reach it through a reverse proxy over https, or on a private network. Behind https
   (`X-Forwarded-Proto: https`) the cookie is marked `Secure`;
@@ -268,7 +304,9 @@ ts=2026-10-08T01:12:40.118Z level=info event=finished schedule=abc123 name=Photo
 | `event` | Meaning |
 |---|---|
 | `schedule`, `schedules_loaded` | schedule table at startup |
-| `still_enabled` | schedule still enabled in zerobyte (warning) |
+| `left_to_zerobyte` | at startup: schedule active in zerobyte, so zerobyte runs it |
+| `handed_to_zerobyte`, `taken_from_zerobyte` | a schedule was activated / paused in zerobyte (its queued cron job is dropped: `dequeued reason=handed_to_zerobyte`) |
+| `schedule_file_conflict` | listed in `SCHEDULES_FILE` but active in zerobyte (warning) |
 | `active_task`, `adopted` | heavy task found running at startup; backups are adopted and waited for |
 | `state_loaded`, `state_reconciled`, `state_error`, `state_saved` | state file loaded / reconciled at startup, load or save failure, saving works again |
 | `resumed`, `queue_restored`, `queue_dropped`, `cooldown_restored` | startup reconciliation of the saved state and the task history |
@@ -280,7 +318,7 @@ ts=2026-10-08T01:12:40.118Z level=info event=finished schedule=abc123 name=Photo
 | `error`, `api_error` | a backup could not be started / the API call failed |
 | `schedule_added`, `schedule_changed`, `schedule_removed`, `refresh_failed` | periodic refresh |
 | `shutdown_inflight` | task left running at shutdown (resumed on restart) |
-| `http_listening`, `ui_login`, `ui_login_failed`, `ui_action` | web interface: listening, sign-ins, actions (`dequeued reason=ui` / `cancel_requested source=ui` follow) |
+| `http_listening`, `ui_login`, `ui_login_failed`, `ui_action` | web interface: listening, sign-ins, actions (`dequeued reason=ui` / `cancel_requested source=ui` follow; Backups pane: `action=scheduling enabled=…` / `action=retention set=… clear=…`, one line per backup) |
 
 ## Development
 

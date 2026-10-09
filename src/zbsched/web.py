@@ -17,6 +17,7 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
@@ -25,6 +26,7 @@ from typing import Any
 
 from aiohttp import web
 
+from .client import ZerobyteError
 from .config import Settings
 from .logs import log_event
 from .scheduler import ActionResult, Scheduler, task_unit
@@ -220,6 +222,167 @@ def _action(name: str) -> Handler:
     return handler
 
 
+# -------------------------------------------------------------- backups (zerobyte)
+
+# zerobyte's retention fields shown in its form (keepWithinDuration is never touched).
+RETENTION_KEYS = ("keepLast", "keepHourly", "keepDaily", "keepWeekly", "keepMonthly", "keepYearly")
+RETENTION_MAX = 100_000
+MAX_IDS = 100
+SHORT_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def _named(item: Any) -> str | None:
+    return item.get("name") if isinstance(item, dict) else None
+
+
+def backup_row(sched: dict[str, Any], scheduler: Scheduler) -> dict[str, Any]:
+    sid = str(sched.get("shortId"))
+    enabled = bool(sched.get("enabled"))
+    if enabled:
+        run_by = "zerobyte"
+    elif sid in scheduler.table:
+        run_by = "zbsched"
+    else:
+        run_by = "none"  # no cron, or excluded by the schedules file
+    policy = sched.get("retentionPolicy") or {}
+    last = sched.get("lastBackupAt")
+    nxt = sched.get("nextBackupAt")
+    return {
+        "short_id": sid,
+        "name": sched.get("name"),
+        "volume": _named(sched.get("volume")),
+        "repository": _named(sched.get("repository")),
+        "enabled": enabled,
+        "cron": sched.get("cronExpression") or "",
+        "retention": {k: policy[k] for k in RETENTION_KEYS if policy.get(k)},
+        "last_status": sched.get("lastBackupStatus"),
+        "last_backup_at": None if last is None else float(last) / 1000.0,
+        "next_backup_at": None if nxt is None else float(nxt) / 1000.0,
+        "run_by": run_by,
+    }
+
+
+async def backups(request: web.Request) -> web.Response:
+    scheduler = request.app[SCHEDULER_KEY]
+    try:
+        items = await scheduler.client.list_schedules()
+    except ZerobyteError as exc:
+        return _error(502, f"zerobyte: {exc}")
+    return web.json_response({"ok": True, "backups": [backup_row(i, scheduler) for i in items]})
+
+
+def _ids(body: dict[str, Any]) -> list[str] | str:
+    ids = body.get("ids")
+    if not isinstance(ids, list) or not 1 <= len(ids) <= MAX_IDS:
+        return f"'ids' must be a list of 1 to {MAX_IDS} schedule ids"
+    if not all(isinstance(i, str) and SHORT_ID.fullmatch(i) for i in ids):
+        return "'ids' holds an invalid schedule id"
+    if len(set(ids)) != len(ids):
+        return "'ids' holds duplicates"
+    return ids
+
+
+def _retention_change(body: dict[str, Any]) -> tuple[dict[str, int], list[str]] | str:
+    set_ = body.get("set", {})
+    clear = body.get("clear", [])
+    if not isinstance(set_, dict) or not isinstance(clear, list):
+        return "'set' must be an object and 'clear' a list"
+    if not set_ and not clear:
+        return "nothing to change: 'set' and 'clear' are both empty"
+    unknown = [k for k in [*set_, *clear] if k not in RETENTION_KEYS]
+    if unknown:
+        return f"unknown retention field(s): {', '.join(map(str, unknown))}"
+    if set(set_) & set(clear):
+        return "a field cannot be both set and cleared"
+    for key, value in set_.items():
+        valid = isinstance(value, int) and not isinstance(value, bool)
+        if not valid or not 1 <= value <= RETENTION_MAX:
+            return f"'{key}' must be a whole number from 1 to {RETENTION_MAX}"
+    return set_, clear
+
+
+def _merge_retention(set_: dict[str, int], clear: list[str]) -> Any:
+    def change(current: dict[str, Any]) -> dict[str, Any]:
+        policy = dict(current.get("retentionPolicy") or {})
+        policy.update(set_)
+        for key in clear:
+            policy.pop(key, None)
+        return {"retentionPolicy": policy}  # {} clears it in zerobyte
+
+    return change
+
+
+async def _bulk_update(
+    request: web.Request, action: str, ids: list[str], changes: Any, **fields: Any
+) -> web.Response:
+    """Update each schedule in turn; one failure does not stop the others."""
+    scheduler = request.app[SCHEDULER_KEY]
+    results = []
+    for sid in ids:
+        try:
+            await scheduler.client.update_schedule(sid, changes)
+            results.append({"id": sid, "ok": True})
+        except ZerobyteError as exc:
+            results.append({"id": sid, "ok": False, "error": str(exc)})
+        log_event(
+            logging.INFO if results[-1]["ok"] else logging.WARNING,
+            "ui_action",
+            action=action,
+            schedule=sid,
+            result="ok" if results[-1]["ok"] else results[-1]["error"],
+            client=_client(request),
+            **fields,
+        )
+    if any(r["ok"] for r in results):
+        # Pick up the hand-over (active = run by zerobyte) without waiting for the refresh.
+        await scheduler.refresh_now()
+    return web.json_response({"ok": all(r["ok"] for r in results), "results": results})
+
+
+async def _json_body(request: web.Request) -> dict[str, Any] | None:
+    try:
+        body = await request.json()
+    except ValueError:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+async def backups_scheduling(request: web.Request) -> web.Response:
+    body = await _json_body(request)
+    if body is None:
+        return _error(400, "expected a JSON object")
+    ids = _ids(body)
+    if isinstance(ids, str):
+        return _error(400, ids)
+    enabled = body.get("enabled")
+    if not isinstance(enabled, bool):
+        return _error(400, "'enabled' must be true or false")
+    return await _bulk_update(
+        request, "scheduling", ids, {"enabled": enabled}, enabled=str(enabled).lower()
+    )
+
+
+async def backups_retention(request: web.Request) -> web.Response:
+    body = await _json_body(request)
+    if body is None:
+        return _error(400, "expected a JSON object")
+    ids = _ids(body)
+    if isinstance(ids, str):
+        return _error(400, ids)
+    change = _retention_change(body)
+    if isinstance(change, str):
+        return _error(400, change)
+    set_, clear = change
+    return await _bulk_update(
+        request,
+        "retention",
+        ids,
+        _merge_retention(set_, clear),
+        set=",".join(f"{k}={v}" for k, v in set_.items()) or None,
+        clear=",".join(clear) or None,
+    )
+
+
 # -------------------------------------------------------------------- status view
 
 
@@ -279,6 +442,7 @@ def build_status(scheduler: Scheduler) -> dict[str, Any]:
                 "cron": entry.cron,
                 "source": entry.source,
                 "enabled_in_zerobyte": entry.enabled_in_zerobyte,
+                "run_by": "zerobyte" if entry.enabled_in_zerobyte else "zbsched",
                 "next_run": (
                     scheduler.next_fires[sid].isoformat() if sid in scheduler.next_fires else None
                 ),
@@ -351,6 +515,9 @@ def make_app(settings: Settings, scheduler: Scheduler, health: StatusFn) -> web.
     app.router.add_post("/api/schedules/{sid}/run-next", _action("run_next"))
     app.router.add_post("/api/schedules/{sid}/run-now", _action("run_now"))
     app.router.add_post("/api/schedules/{sid}/cancel", _action("cancel"))
+    app.router.add_get("/api/backups", backups)
+    app.router.add_post("/api/backups/scheduling", backups_scheduling)
+    app.router.add_post("/api/backups/retention", backups_retention)
     return app
 
 

@@ -252,6 +252,7 @@ td .sub { display: block; font-size: 12px; color: var(--muted-foreground); }
 .state.queued, .state.busy_external { color: var(--queue); background: color-mix(in oklab, var(--queue) 15%, transparent); border-color: color-mix(in oklab, var(--queue) 30%, transparent); }
 .state.cooldown { color: var(--cool); background: color-mix(in oklab, var(--cool) 15%, transparent); border-color: color-mix(in oklab, var(--cool) 30%, transparent); }
 .state.idle { color: var(--muted-foreground); border-color: var(--border); }
+.state.zerobyte { color: var(--success); background: color-mix(in oklab, var(--success) 12%, transparent); border-color: color-mix(in oklab, var(--success) 30%, transparent); }
 .result { font-weight: 600; }
 .result::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: var(--muted-foreground); vertical-align: 1px; }
 .result.succeeded, .result.success { color: var(--success); }
@@ -263,6 +264,51 @@ td .sub { display: block; font-size: 12px; color: var(--muted-foreground); }
 .err { display: block; margin-top: 4px; font-size: 12px; color: var(--muted-foreground); max-width: 38ch; overflow-wrap: anywhere; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .empty-table { padding: 32px; text-align: center; color: var(--muted-foreground); }
+
+/* ---- backups pane */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 24px 16px; }
+.toolbar .count { color: var(--muted-foreground); font-size: 13px; margin-right: auto; min-width: 9ch; }
+.chk { width: 1%; padding-right: 0; }
+input[type="checkbox"] { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--strong-accent); cursor: pointer; }
+tbody tr.sel { background: color-mix(in oklab, var(--strong-accent) 6%, transparent); }
+.manual { color: var(--muted-foreground); font-style: italic; white-space: nowrap; }
+/* zerobyte OnOff: uppercase pill with a knob */
+.onoff {
+  height: 30px; padding: 0 4px 0 12px; gap: 10px; border-radius: 999px;
+  color: var(--muted-foreground); background: transparent; border-color: var(--border);
+}
+.onoff .knob { position: relative; width: 36px; height: 20px; border-radius: 999px; background: var(--muted); transition: background-color .15s; }
+.onoff .knob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--foreground); transition: transform .15s; }
+.onoff.on { color: var(--success); border-color: color-mix(in oklab, var(--success) 40%, transparent); background: color-mix(in oklab, var(--success) 10%, transparent); }
+.onoff.on .knob { background: var(--success); }
+.onoff.on .knob::after { transform: translateX(16px); background: #fff; }
+.onoff:hover:not(:disabled) { background: var(--muted); }
+.onoff.on:hover:not(:disabled) { background: color-mix(in oklab, var(--success) 18%, transparent); }
+
+/* ---- retention dialog (zerobyte "Retention policy" card) */
+dialog.card { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: visible; color: var(--foreground); margin: auto; }
+dialog.card::backdrop { background: rgba(0, 0, 0, .6); }
+.dlg-body { overflow-y: auto; max-height: calc(100dvh - 200px); margin: 20px -4px 0; padding: 0 4px; }
+.fields { display: grid; gap: 16px; }
+@media (min-width: 640px) { .fields { grid-template-columns: 1fr 1fr; } }
+.field { display: grid; gap: 8px; align-content: start; }
+.field label { font-size: 14px; font-weight: 500; }
+.field .row { display: flex; gap: 6px; }
+.field input {
+  flex: 1; min-width: 0; height: 36px; padding: 4px 12px; font: inherit; font-size: 14px;
+  border: 1px solid var(--input); border-radius: 6px; background: transparent; color: var(--foreground);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .05);
+}
+.field input:focus-visible { outline: none; border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent); }
+.field input[aria-invalid="true"] { border-color: var(--destructive); }
+.field .clear { width: 36px; height: 36px; padding: 0; font-size: 16px; text-transform: none; }
+.field .clear[aria-pressed="true"] { color: var(--destructive); border-color: var(--destructive); }
+.field .help { margin: 0; color: var(--muted-foreground); font-size: 12px; }
+.field .msg { margin: 0; color: var(--destructive); font-size: 13px; }
+.field .msg:empty { display: none; }
+.dlg-errors { margin: 16px 0 0; padding: 10px 14px; border: 1px solid color-mix(in oklab, var(--destructive) 40%, transparent); background: color-mix(in oklab, var(--destructive) 8%, transparent); color: var(--destructive); font-size: 13px; list-style: none; }
+.dlg-errors li + li { margin-top: 4px; }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
 
 /* ---- login */
 .login-page { position: relative; min-height: 100dvh; display: flex; align-items: flex-start; justify-content: center; padding: 14vh 16px 0; }
@@ -311,6 +357,8 @@ td .sub { display: block; font-size: 12px; color: var(--muted-foreground); }
   td, td:first-child, td:last-child { border: 0; padding: 4px 16px; }
   td[data-label]::before { content: attr(data-label); display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .02em; color: var(--muted-foreground); }
   .actions { justify-content: flex-start; padding-top: 6px; }
+  .toolbar { padding: 0 16px 12px; }
+  td.chk { float: right; padding: 4px 16px 0 0; }
 }
 </style>
 </head>
@@ -323,6 +371,7 @@ td .sub { display: block; font-size: 12px; color: var(--muted-foreground); }
   <symbol id="i-sched" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h5"/><path d="M17.5 17.5 16 16.3V14"/><circle cx="16" cy="16" r="6"/></symbol>
   <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
   <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
   <symbol id="i-panel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></symbol>
   <symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></symbol>
 </svg>
@@ -406,9 +455,52 @@ td .sub { display: block; font-size: 12px; color: var(--muted-foreground); }
         </table>
       </section>
     </div>
+
+    <div class="wrap" data-section="backups" hidden>
+      <section class="card table-card">
+        <div class="head card-head">
+          <div>
+            <h1 class="card-title">Backups</h1>
+            <p class="card-desc">Backup schedules configured in zerobyte. <b>Active</b> ones are run by zerobyte itself, <b>paused</b> ones by <span class="hi">zbsched</span>.</p>
+          </div>
+          <button id="bk-reload" type="button" title="Reload the list from zerobyte">Reload</button>
+        </div>
+        <div class="toolbar">
+          <button id="bk-all" type="button">Select all</button>
+          <span class="count" id="bk-count" aria-live="polite">0 selected</span>
+          <button id="bk-activate" type="button" title="Let zerobyte schedule the selected backups">Activate</button>
+          <button id="bk-pause" type="button" title="Pause zerobyte scheduling: zbsched runs them">Pause</button>
+          <button id="bk-retention" type="button">Edit retention</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th class="chk"><input type="checkbox" id="bk-head" aria-label="Select all backups"></th>
+              <th>Backup</th><th>Scheduling</th><th>Cron</th><th>Retention</th><th>Last backup</th><th><span hidden>Actions</span></th>
+            </tr>
+          </thead>
+          <tbody id="bk-rows"><tr><td colspan="7" class="empty-table">Loading…</td></tr></tbody>
+        </table>
+      </section>
+    </div>
     </main>
   </div>
 </div>
+
+<dialog class="card" id="ret-dialog" aria-labelledby="ret-title">
+  <form id="ret-form" method="dialog" novalidate>
+    <h2 class="card-title" id="ret-title">Retention policy</h2>
+    <p class="card-desc" id="ret-desc">Define how many snapshots to keep. Leave empty to keep all.</p>
+    <div class="dlg-body">
+      <div class="fields" id="ret-fields"></div>
+      <ul class="dlg-errors" id="ret-errors" role="alert" hidden></ul>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" id="ret-cancel">Cancel</button>
+      <button type="submit" class="primary" id="ret-save">Save</button>
+    </div>
+  </form>
+</dialog>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
 
@@ -558,6 +650,9 @@ function stateCell(r) {
     cooldown: `Cool-down until ${clock(r.cooldown_until)}`,
     idle: "Idle",
   };
+  if (r.state === "idle" && r.run_by === "zerobyte") {
+    return el("span", { class: "state zerobyte", title: "Active in zerobyte: zerobyte runs it on its cron, zbsched leaves it alone", text: "Run by zerobyte" });
+  }
   return el("span", { class: `state ${r.state}`, text: labels[r.state] || r.state });
 }
 
@@ -612,10 +707,9 @@ function renderRows(s) {
     el("td", {},
       el("span", { class: "sname", text: r.name }),
       el("span", { class: "sub mono", text: r.short_id }),
-      r.enabled_in_zerobyte ? el("span", { class: "warn", title: "zerobyte will also run it on its own", text: "Still enabled in zerobyte" }) : null,
     ),
     el("td", { "data-label": "Cron" }, el("code", { class: "cron", text: r.cron }), r.source === "file" ? el("span", { class: "sub", text: "from schedules file" }) : null),
-    el("td", { "data-label": "Next run", text: nextRun(r.next_run) }),
+    el("td", { "data-label": "Next run", text: r.run_by === "zerobyte" ? "by zerobyte" : nextRun(r.next_run) }),
     el("td", { "data-label": "State" }, stateCell(r)),
     el("td", { "data-label": "Last backup" }, lastCell(r)),
     el("td", {}, actionButtons(r)),
@@ -684,6 +778,264 @@ $("refresh").addEventListener("click", async () => {
   }
 });
 
+// ------------------------------------------------------------------- backups
+
+// zerobyte's retention form: same fields, labels, placeholders and help texts.
+const RETENTION = [
+  { key: "keepLast", label: "Keep last N snapshots", placeholder: "Optional", help: "Keep the N most recent snapshots.", short: "last" },
+  { key: "keepHourly", label: "Keep hourly", placeholder: "Optional", help: "Keep the last N hourly snapshots.", short: "hourly" },
+  { key: "keepDaily", label: "Keep daily", placeholder: "e.g., 7", help: "Keep the last N daily snapshots.", short: "daily" },
+  { key: "keepWeekly", label: "Keep weekly", placeholder: "e.g., 4", help: "Keep the last N weekly snapshots.", short: "weekly" },
+  { key: "keepMonthly", label: "Keep monthly", placeholder: "e.g., 6", help: "Keep the last N monthly snapshots.", short: "monthly" },
+  { key: "keepYearly", label: "Keep yearly", placeholder: "Optional", help: "Keep the last N yearly snapshots.", short: "yearly" },
+];
+
+let backupList = [];
+const selected = new Set();
+let bkBusy = false;
+
+function plural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
+
+function retentionText(policy) {
+  const parts = RETENTION.filter((f) => policy[f.key]).map((f) => f.key === "keepLast" ? `last ${policy[f.key]}` : `${policy[f.key]} ${f.short}`);
+  return parts.length ? parts.join(" • ") : "Keep all";
+}
+
+async function loadBackups() {
+  $("bk-reload").disabled = true;
+  try {
+    const { status, data } = await api("/api/backups");
+    if (status === 401) return showLogin();
+    if (status !== 200) throw new Error(data.error || `HTTP ${status}`);
+    showApp();
+    backupList = data.backups;
+    const known = new Set(backupList.map((b) => b.short_id));
+    for (const id of [...selected]) if (!known.has(id)) selected.delete(id);
+    renderBackups();
+  } catch (e) {
+    toast(`Cannot load the backups: ${e.message}`, true);
+    if (!backupList.length) $("bk-rows").replaceChildren(el("tr", {}, el("td", { colspan: "7", class: "empty-table", text: `Cannot load the backups: ${e.message}` })));
+  } finally {
+    $("bk-reload").disabled = false;
+  }
+}
+
+function syncSelection() {
+  const n = selected.size;
+  const all = backupList.length > 0 && n === backupList.length;
+  $("bk-count").textContent = `${n} selected`;
+  $("bk-all").textContent = all ? "Select none" : "Select all";
+  $("bk-head").checked = all;
+  $("bk-head").indeterminate = n > 0 && !all;
+  for (const id of ["bk-activate", "bk-pause", "bk-retention"]) $(id).disabled = n === 0 || bkBusy;
+  for (const tr of $("bk-rows").children) {
+    const box = tr.querySelector("input[type=checkbox]");
+    if (box) { box.checked = selected.has(tr.dataset.id); tr.classList.toggle("sel", box.checked); }
+  }
+}
+
+function setAll(on) {
+  selected.clear();
+  if (on) for (const b of backupList) selected.add(b.short_id);
+  syncSelection();
+}
+
+function onOff(b) {
+  const manual = !b.cron;
+  return el("div", {},
+    el("button", {
+      type: "button", class: `onoff${b.enabled ? " on" : ""}`, role: "switch", "aria-checked": String(b.enabled),
+      // Pausing is always possible; zerobyte refuses to activate a schedule without cron.
+      disabled: bkBusy || (manual && !b.enabled),
+      title: manual && !b.enabled ? "Manual only: no cron to schedule" : (b.enabled ? "Pause zerobyte scheduling: zbsched will run it" : "Let zerobyte schedule it: zbsched will leave it alone"),
+      onclick: () => setScheduling([b.short_id], !b.enabled),
+    }, el("span", { text: b.enabled ? "Active" : "Paused" }), el("span", { class: "knob", "aria-hidden": "true" })),
+    el("span", { class: "sub", text: { zerobyte: "run by zerobyte", zbsched: "run by zbsched", none: "not scheduled" }[b.run_by] }),
+  );
+}
+
+function renderBackups() {
+  if (!backupList.length) {
+    $("bk-rows").replaceChildren(el("tr", {}, el("td", { colspan: "7", class: "empty-table", text: "No backup schedules in zerobyte." })));
+    syncSelection();
+    return;
+  }
+  $("bk-rows").replaceChildren(...backupList.map((b) => el("tr", { "data-id": b.short_id },
+    el("td", { class: "chk" }, el("input", {
+      type: "checkbox", "aria-label": `Select ${b.name}`,
+      onchange: (ev) => { if (ev.target.checked) selected.add(b.short_id); else selected.delete(b.short_id); syncSelection(); },
+    })),
+    el("td", {},
+      el("span", { class: "sname", text: b.name }),
+      el("span", { class: "sub", text: [b.volume, b.repository].filter(Boolean).join(" → ") || b.short_id }),
+    ),
+    el("td", { "data-label": "Scheduling" }, onOff(b)),
+    el("td", { "data-label": "Cron" }, b.cron ? el("code", { class: "cron", text: b.cron }) : el("span", { class: "manual", text: "Manual only" })),
+    el("td", { "data-label": "Retention", text: retentionText(b.retention) }),
+    el("td", { "data-label": "Last backup" }, lastCell({ last: { status: b.last_status, finished_at: b.last_backup_at } })),
+    el("td", {}, el("div", { class: "actions" }, el("button", { type: "button", onclick: () => openRetention([b.short_id]), text: "Edit retention" }))),
+  )));
+  syncSelection();
+}
+
+function names(ids) {
+  const byId = new Map(backupList.map((b) => [b.short_id, b.name]));
+  return (id) => byId.get(id) || id;
+}
+
+// Runs one bulk call; returns the per-backup results, or null when the call itself failed.
+async function bulk(path, body) {
+  bkBusy = true;
+  syncSelection();
+  try {
+    const { status, data } = await api(`/api/backups/${path}`, "POST", body);
+    if (status === 401) { showLogin("Your session expired. Sign in again."); return null; }
+    if (status !== 200) { toast(`${data.error || `HTTP ${status}`}`, true); return null; }
+    return data.results;
+  } catch (e) {
+    toast(`Request failed: ${e.message}`, true);
+    return null;
+  } finally {
+    bkBusy = false;
+    await loadBackups();
+  }
+}
+
+async function setScheduling(ids, enabled) {
+  const results = await bulk("scheduling", { ids, enabled });
+  if (!results) return;
+  const name = names(ids);
+  const failed = results.filter((r) => !r.ok);
+  const done = results.length - failed.length;
+  const verb = enabled ? "now run by zerobyte" : "paused in zerobyte, now run by zbsched";
+  if (!failed.length) toast(ids.length === 1 ? `${name(ids[0])}: ${verb}.` : `${plural(done, "backup")} ${verb}.`);
+  else toast(`${done} of ${results.length} changed. Failed: ${failed.map((r) => `${name(r.id)} (${r.error})`).join("; ")}`, true);
+}
+
+function bulkScheduling(enabled) {
+  const ids = [...selected];
+  const what = enabled
+    ? `Activate zerobyte scheduling for ${plural(ids.length, "backup")}?\n\nzbsched will stop running them.`
+    : `Pause zerobyte scheduling for ${plural(ids.length, "backup")}?\n\nzbsched will run them on their cron.`;
+  if (confirm(what)) setScheduling(ids, enabled);
+}
+
+// ---- retention dialog
+
+let dialogIds = [];
+const touched = new Set(); // multi-backup mode: fields the user changed
+const cleared = new Set(); // multi-backup mode: fields to remove on all
+
+function retentionField(f) {
+  const input = el("input", { id: `ret-${f.key}`, type: "number", min: "1", step: "1", inputmode: "numeric", placeholder: f.placeholder, "aria-describedby": `ret-${f.key}-help` });
+  const clear = el("button", { type: "button", class: "clear", title: "Remove this rule on all selected backups", "aria-label": `Remove ${f.label} on all`, "aria-pressed": "false", text: "×" });
+  input.addEventListener("input", () => {
+    touched.add(f.key);
+    if (cleared.delete(f.key)) { clear.setAttribute("aria-pressed", "false"); input.placeholder = f.placeholder; }
+    validateField(f);
+    syncSave();
+  });
+  clear.addEventListener("click", () => {
+    const on = !cleared.has(f.key);
+    if (on) { cleared.add(f.key); touched.delete(f.key); input.value = ""; input.placeholder = "removed on all"; }
+    else { cleared.delete(f.key); input.placeholder = input.dataset.mixed ? "mixed" : f.placeholder; }
+    clear.setAttribute("aria-pressed", String(on));
+    validateField(f);
+    syncSave();
+  });
+  return el("div", { class: "field" },
+    el("label", { for: `ret-${f.key}`, text: f.label }),
+    el("div", { class: "row" }, input, clear),
+    el("p", { class: "help", id: `ret-${f.key}-help`, text: f.help }),
+    el("p", { class: "msg", id: `ret-${f.key}-msg` }),
+  );
+}
+
+function fieldValue(f) {
+  const raw = $(`ret-${f.key}`).value.trim();
+  if (raw === "") return { empty: true };
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 100000) return { error: "Enter a whole number from 1 to 100000, or leave it empty." };
+  return { value: n };
+}
+
+function validateField(f) {
+  const v = fieldValue(f);
+  $(`ret-${f.key}-msg`).textContent = v.error || "";
+  $(`ret-${f.key}`).setAttribute("aria-invalid", String(Boolean(v.error)));
+  return !v.error;
+}
+
+function syncSave() {
+  const multi = dialogIds.length > 1;
+  $("ret-save").disabled = multi && touched.size === 0 && cleared.size === 0;
+}
+
+function openRetention(ids) {
+  dialogIds = ids;
+  touched.clear();
+  cleared.clear();
+  const multi = ids.length > 1;
+  const chosen = backupList.filter((b) => ids.includes(b.short_id));
+  $("ret-fields").replaceChildren(...RETENTION.map(retentionField));
+  for (const f of RETENTION) {
+    const input = $(`ret-${f.key}`);
+    const values = new Set(chosen.map((b) => b.retention[f.key] ?? ""));
+    if (values.size === 1) input.value = [...values][0];
+    else { input.placeholder = "mixed"; input.dataset.mixed = "1"; }
+    input.parentElement.querySelector(".clear").hidden = !multi;
+  }
+  $("ret-title").textContent = multi ? `Retention policy — ${ids.length} backups` : "Retention policy";
+  $("ret-desc").textContent = multi
+    ? "Define how many snapshots to keep. Only the fields you change are applied; × removes a rule on all of them."
+    : `Define how many snapshots to keep for ${chosen[0] ? chosen[0].name : ids[0]}. Leave empty to keep all.`;
+  $("ret-save").textContent = multi ? `Apply to ${ids.length}` : "Save";
+  $("ret-errors").hidden = true;
+  syncSave();
+  $("ret-dialog").showModal();
+}
+
+$("ret-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if (!RETENTION.every(validateField)) return;
+  const multi = dialogIds.length > 1;
+  const set = {};
+  const clear = [];
+  for (const f of RETENTION) {
+    const v = fieldValue(f);
+    if (multi) {
+      if (cleared.has(f.key)) clear.push(f.key);
+      else if (touched.has(f.key)) { if (v.empty) clear.push(f.key); else set[f.key] = v.value; }
+    } else if (v.empty) clear.push(f.key);
+    else set[f.key] = v.value;
+  }
+  if (!Object.keys(set).length && !clear.length) { $("ret-dialog").close(); return; }
+  $("ret-save").disabled = true;
+  const results = await bulk("retention", { ids: dialogIds, set, clear });
+  $("ret-save").disabled = false;
+  if (!results) return;
+  const failed = results.filter((r) => !r.ok);
+  if (!failed.length) {
+    $("ret-dialog").close();
+    toast(multi ? `Retention updated on ${plural(results.length, "backup")}.` : "Retention policy saved.");
+    return;
+  }
+  const name = names(dialogIds);
+  $("ret-errors").replaceChildren(
+    el("li", { text: `${results.length - failed.length} of ${results.length} saved. Not saved:` }),
+    ...failed.map((r) => el("li", { text: `${name(r.id)}: ${r.error}` })),
+  );
+  $("ret-errors").hidden = false;
+});
+
+$("ret-cancel").addEventListener("click", () => $("ret-dialog").close());
+$("bk-reload").addEventListener("click", loadBackups);
+$("bk-all").addEventListener("click", () => setAll(selected.size !== backupList.length));
+$("bk-head").addEventListener("change", (ev) => setAll(ev.target.checked));
+$("bk-activate").addEventListener("click", () => bulkScheduling(true));
+$("bk-pause").addEventListener("click", () => bulkScheduling(false));
+$("bk-retention").addEventListener("click", () => openRetention([...selected]));
+
 // ------------------------------------------------------------------- sections
 
 // One entry per sidebar item. Each has a <div data-section="<id>"> in the page and its
@@ -691,6 +1043,7 @@ $("refresh").addEventListener("click", async () => {
 // answers 401 when the session is gone, which brings the sign-in form back.
 const SECTIONS = [
   { id: "scheduler", label: "Scheduler", icon: "i-sched", crumb: "Backup queue", start: poll, stop: stopPolling },
+  { id: "backups", label: "Backups", icon: "i-archive", crumb: "zerobyte schedules", start: loadBackups, stop: () => {} },
 ];
 let current = null;
 

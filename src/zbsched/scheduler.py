@@ -218,6 +218,10 @@ class Scheduler:
         old = self.table
         for sid, entry in table.entries.items():
             previous = old.get(sid)
+            if entry.enabled_in_zerobyte:
+                # zerobyte runs it on its own cron: no next fire, so never queued on cron.
+                self.next_fires.pop(sid, None)
+                continue
             if previous is None or previous.cron != entry.cron or sid not in self.next_fires:
                 self.next_fires[sid] = next_fire(entry.cron, now_dt)
                 if not initial:
@@ -239,19 +243,41 @@ class Scheduler:
                 log_event(WARNING, "dequeued", schedule=sid, reason="schedule_removed")
         self.table = dict(table.entries)
 
+        # Active in zerobyte = zerobyte runs it; paused = we run it. Log each hand-over.
         enabled = {sid for sid, e in table.entries.items() if e.enabled_in_zerobyte}
         for sid in sorted(enabled - self.enabled_in_zerobyte):
-            log_event(
-                WARNING,
-                "still_enabled",
-                "schedule is enabled in zerobyte, which will run it too: disable it in the UI",
-                schedule=sid,
-                name=self._name(sid),
-            )
-        for sid in sorted(self.enabled_in_zerobyte - enabled):
-            if sid in self.table:
-                log_event(INFO, "now_disabled", schedule=sid, name=self._name(sid))
+            entry = table.entries[sid]
+            if initial:
+                log_event(INFO, "left_to_zerobyte", schedule=sid, name=entry.name)
+            else:
+                log_event(INFO, "handed_to_zerobyte", schedule=sid, name=entry.name)
+            if entry.source == "file":
+                log_event(
+                    WARNING,
+                    "schedule_file_conflict",
+                    "listed in the schedules file but active in zerobyte, which runs it",
+                    schedule=sid,
+                    name=entry.name,
+                )
+            dropped = [job for job in self.queue if job.short_id == sid]
+            for job in dropped:
+                self.queue.remove(job)
+                log_event(INFO, "dequeued", schedule=sid, reason="handed_to_zerobyte")
+        if not initial:
+            for sid in sorted(self.enabled_in_zerobyte - enabled):
+                if sid in self.table:
+                    log_event(
+                        INFO,
+                        "taken_from_zerobyte",
+                        schedule=sid,
+                        name=self._name(sid),
+                        next_run=self.next_fires[sid].isoformat(),
+                    )
         self.enabled_in_zerobyte = enabled
+
+    def owned(self) -> list[str]:
+        """Schedules this service runs on their cron (paused in zerobyte)."""
+        return [sid for sid, e in self.table.items() if not e.enabled_in_zerobyte]
 
     async def refresh(self) -> list[str]:
         """Reload the table; on any error keep the last good one and return the problems."""
@@ -278,6 +304,8 @@ class Scheduler:
         self.last_refresh = self.clock()
         self.apply_table(table, initial=True)
         for sid, entry in sorted(self.table.items()):
+            if entry.enabled_in_zerobyte:
+                continue  # logged as left_to_zerobyte
             log_event(
                 INFO,
                 "schedule",
@@ -287,7 +315,12 @@ class Scheduler:
                 source=entry.source,
                 next_run=self.next_fires[sid].isoformat(),
             )
-        log_event(INFO, "schedules_loaded", count=len(self.table))
+        log_event(
+            INFO,
+            "schedules_loaded",
+            count=len(self.table),
+            run_by_zerobyte=len(self.enabled_in_zerobyte),
+        )
         saved = self.store.load() if self.store else SavedState()
         await self.reconcile(saved)
         self.save_state()
@@ -354,6 +387,8 @@ class Scheduler:
                 log_event(
                     WARNING, "queue_dropped", schedule=job.short_id, reason="schedule_removed"
                 )
+            elif job.short_id in self.enabled_in_zerobyte and job.reason in ("cron", "catchup"):
+                log_event(INFO, "queue_dropped", schedule=job.short_id, reason="handed_to_zerobyte")
             elif self.is_queued(job.short_id):
                 log_event(WARNING, "queue_dropped", schedule=job.short_id, reason="duplicate")
             else:
@@ -460,7 +495,9 @@ class Scheduler:
         missed = [
             entry
             for sid, entry in self.table.items()
-            if sid not in self.running and entry.missed_run(now_dt)
+            if sid not in self.running
+            and not entry.enabled_in_zerobyte
+            and entry.missed_run(now_dt)
         ]
         missed.sort(key=lambda e: e.last_backup_at or 0.0)
         for entry in missed:

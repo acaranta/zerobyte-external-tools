@@ -35,9 +35,16 @@ def test_check(env, fake, capsys):
     assert main(["--check"]) == EXIT_OK
     out = capsys.readouterr().out
     assert "SHORT_ID" in out
-    assert "ENABLED (disable it!)" in out
-    assert "event=still_enabled" in out
+    assert "RUN_BY" in out
+    line_a = next(line for line in out.splitlines() if line.startswith("a "))
+    assert line_a.split()[-1] == "zerobyte"
+    assert "event=left_to_zerobyte schedule=a" in out
     assert fake[1].run_log == []
+
+
+def test_once_all_skips_schedules_run_by_zerobyte(env, fake):
+    assert main(["--once", "all"]) == EXIT_OK
+    assert fake[1].run_log == ["b", "c"]
 
 
 def test_once_runs_sequentially(env, fake, capsys):

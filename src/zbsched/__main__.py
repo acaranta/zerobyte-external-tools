@@ -1,7 +1,7 @@
 """Command-line entry point.
 
 python -m zbsched                 run the scheduler (default)
-python -m zbsched --once all      run every scheduled backup one after another, then exit
+python -m zbsched --once all      run every backup we own (paused in zerobyte) one by one, then exit
 python -m zbsched --once a,b      same for the given shortIds (or names)
 python -m zbsched --check         validate config + connectivity and print the table
 """
@@ -57,7 +57,8 @@ def _install_signal_handlers(stop: asyncio.Event) -> None:
 def resolve_once_targets(scheduler: Scheduler, spec: str) -> list[str]:
     """Map ``all`` or a comma-separated list of shortIds/names to shortIds."""
     if spec.strip().lower() == "all":
-        return sorted(scheduler.table, key=lambda sid: scheduler.table[sid].name)
+        # Only the schedules we own: the active ones are zerobyte's to run.
+        return sorted(scheduler.owned(), key=lambda sid: scheduler.table[sid].name)
     targets: list[str] = []
     problems: list[str] = []
     for ref in (r.strip() for r in spec.split(",") if r.strip()):
@@ -77,17 +78,17 @@ def resolve_once_targets(scheduler: Scheduler, spec: str) -> list[str]:
 
 
 def print_table(scheduler: Scheduler) -> None:
-    rows = [("SHORT_ID", "NAME", "CRON", "SOURCE", "NEXT_RUN", "ZEROBYTE")]
+    rows = [("SHORT_ID", "NAME", "CRON", "SOURCE", "NEXT_RUN", "RUN_BY")]
     for sid, entry in sorted(scheduler.table.items(), key=lambda kv: kv[1].name):
-        nxt: datetime = scheduler.next_fires[sid]
+        nxt: datetime | None = scheduler.next_fires.get(sid)
         rows.append(
             (
                 sid,
                 entry.name,
                 entry.cron,
                 entry.source,
-                nxt.strftime("%Y-%m-%d %H:%M %Z"),
-                "ENABLED (disable it!)" if entry.enabled_in_zerobyte else "disabled",
+                nxt.strftime("%Y-%m-%d %H:%M %Z") if nxt else "-",
+                "zerobyte" if entry.enabled_in_zerobyte else "zbsched",
             )
         )
     widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]

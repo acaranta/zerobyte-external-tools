@@ -260,3 +260,134 @@ def test_page_ships_with_the_package():
     from zbsched.web import load_page
 
     assert b"Backup queue" in load_page()
+
+
+# ------------------------------------------------------------------ backups pane
+
+AUTH = {"x-api-key": KEY, **HDR}
+
+
+def zb(sid, *, enabled=False, cron="0 3 * * *", retention=None):
+    return {
+        **sched(sid, cron),
+        "enabled": enabled,
+        "volume": {"name": f"vol-{sid}"},
+        "repository": {"name": "s3-main"},
+        "retentionPolicy": retention,
+        "nextBackupAt": None,
+    }
+
+
+async def test_backups_list(serve):
+    _, _, _, http = await serve(
+        [
+            zb("a", retention={"keepDaily": 7, "keepLast": 0, "keepWithinDuration": "1y"}),
+            zb("b", enabled=True),
+            zb("m", cron=""),
+        ]
+    )
+    r = await http.get("/api/backups", headers=AUTH)
+    assert r.status_code == 200
+    rows = {row["short_id"]: row for row in r.json()["backups"]}
+    assert rows["a"]["retention"] == {"keepDaily": 7}  # 0 = no rule, duration not shown
+    assert (rows["a"]["volume"], rows["a"]["repository"]) == ("vol-a", "s3-main")
+    assert [rows[x]["run_by"] for x in "abm"] == ["zbsched", "zerobyte", "none"]
+    assert rows["b"]["retention"] == {}
+    assert rows["a"]["last_backup_at"] == pytest.approx(T0 - 3600)
+
+
+async def test_backups_list_zerobyte_down(serve):
+    _, fake, _, http = await serve([zb("a")])
+    fake.down = True
+    r = await http.get("/api/backups", headers=AUTH)
+    assert r.status_code == 502
+    assert r.json()["ok"] is False
+
+
+async def test_backups_routes_require_auth_and_csrf(serve):
+    _, fake, _, http = await serve([zb("a")])
+    assert (await http.get("/api/backups")).status_code == 401
+    body = {"ids": ["a"], "enabled": True}
+    r = await http.post("/api/backups/scheduling", json=body, headers={"x-api-key": KEY})
+    assert r.status_code == 403
+    r = await http.post("/api/backups/retention", json=body)
+    assert r.status_code == 401
+    assert fake.updates == []
+
+
+async def test_scheduling_bulk_hands_over_and_reports_each_failure(serve):
+    s, _, _, http = await serve([zb("a"), zb("b"), zb("m", cron="")])
+    assert s.owned() == ["a", "b"]
+    r = await http.post(
+        "/api/backups/scheduling", json={"ids": ["a", "m", "b"], "enabled": True}, headers=AUTH
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert [(x["id"], x["ok"]) for x in body["results"]] == [("a", True), ("m", False), ("b", True)]
+    assert "require a cron expression" in body["results"][1]["error"]
+    # the scheduler reloaded at once: a and b are now zerobyte's
+    assert s.owned() == []
+    assert s.enabled_in_zerobyte == {"a", "b"}
+
+    r = await http.post(
+        "/api/backups/scheduling", json={"ids": ["a"], "enabled": False}, headers=AUTH
+    )
+    assert r.json() == {"ok": True, "results": [{"id": "a", "ok": True}]}
+    assert s.owned() == ["a"]
+
+
+async def test_retention_merges_set_and_clear_per_backup(serve):
+    _, fake, _, http = await serve(
+        [
+            zb("a", retention={"keepLast": 3, "keepDaily": 7, "keepWithinDuration": "1y"}),
+            zb("b", retention=None),
+        ]
+    )
+    r = await http.post(
+        "/api/backups/retention",
+        json={"ids": ["a", "b"], "set": {"keepWeekly": 4}, "clear": ["keepLast"]},
+        headers=AUTH,
+    )
+    assert r.json()["ok"] is True
+    policies = {x["shortId"]: x["retentionPolicy"] for x in fake.schedules}
+    assert policies["a"] == {"keepDaily": 7, "keepWeekly": 4, "keepWithinDuration": "1y"}
+    assert policies["b"] == {"keepWeekly": 4}
+
+    # clearing the last rule sends {} which zerobyte stores as "no policy"
+    r = await http.post(
+        "/api/backups/retention", json={"ids": ["b"], "clear": ["keepWeekly"]}, headers=AUTH
+    )
+    assert r.json()["ok"] is True
+    assert fake.updates[-1] == ("b", {"retentionPolicy": {}})
+    assert next(x for x in fake.schedules if x["shortId"] == "b")["retentionPolicy"] is None
+
+
+@pytest.mark.parametrize(
+    ("path", "body", "message"),
+    [
+        ("scheduling", {"ids": [], "enabled": True}, "'ids'"),
+        ("scheduling", {"ids": ["a", "a"], "enabled": True}, "duplicates"),
+        ("scheduling", {"ids": ["../x"], "enabled": True}, "invalid schedule id"),
+        ("scheduling", {"ids": ["a"], "enabled": "yes"}, "'enabled'"),
+        ("retention", {"ids": ["a"]}, "nothing to change"),
+        ("retention", {"ids": ["a"], "set": {"keepWithinDuration": "1y"}}, "unknown"),
+        ("retention", {"ids": ["a"], "set": {"keepDaily": 0}}, "whole number"),
+        ("retention", {"ids": ["a"], "set": {"keepDaily": 2.5}}, "whole number"),
+        ("retention", {"ids": ["a"], "set": {"keepDaily": True}}, "whole number"),
+        ("retention", {"ids": ["a"], "set": {"keepDaily": 1}, "clear": ["keepDaily"]}, "both"),
+    ],
+)
+async def test_backups_validation(serve, path, body, message):
+    _, fake, _, http = await serve([zb("a")])
+    r = await http.post(f"/api/backups/{path}", json=body, headers=AUTH)
+    assert r.status_code == 400
+    assert message in r.json()["error"]
+    assert fake.updates == []
+
+
+async def test_status_rows_show_who_runs_them(serve):
+    _, _, _, http = await serve([zb("a"), zb("b", enabled=True)])
+    rows = (await http.get("/api/status", headers=AUTH)).json()["schedules"]
+    assert {r["short_id"]: (r["run_by"], r["next_run"]) for r in rows}["b"] == ("zerobyte", None)
+    assert next(r for r in rows if r["short_id"] == "a")["run_by"] == "zbsched"
