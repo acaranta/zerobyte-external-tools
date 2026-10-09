@@ -34,6 +34,10 @@ class FakeZerobyte:
         self.forget_after_backup = False
         self.history_calls: list[tuple[str, int]] = []
         self.history_error: Exception | None = None
+        self.destinations: list[dict[str, Any]] = []
+        self.notifications: dict[str, list[dict[str, Any]]] = {}
+        self.notification_errors: dict[str, Exception] = {}
+        self.notification_puts: list[tuple[str, list[dict[str, Any]]]] = []
         self._n = 0
 
     # -- helpers for tests
@@ -117,6 +121,32 @@ class FakeZerobyte:
             if sched["shortId"] == short_id:
                 self.schedules[i] = merged
         return merged
+
+    async def list_notification_destinations(self) -> list[dict[str, Any]]:
+        self._check()
+        return [dict(d) for d in self.destinations]
+
+    async def get_schedule_notifications(self, short_id: str) -> list[dict[str, Any]]:
+        """Same shape as zerobyte: each assignment embeds its destination (with config)."""
+        await self.get_schedule(short_id)
+        if short_id in self.notification_errors:
+            raise self.notification_errors[short_id]
+        by_id = {d["id"]: d for d in self.destinations}
+        return [
+            {**a, "scheduleId": 1, "destination": dict(by_id[a["destinationId"]])}
+            for a in self.notifications.get(short_id, [])
+        ]
+
+    async def set_schedule_notifications(
+        self, short_id: str, assignments: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        await self.get_schedule(short_id)
+        known = {d["id"] for d in self.destinations}
+        if any(a["destinationId"] not in known for a in assignments):
+            raise NotFound("HTTP 404 One or more notification destinations were not found", 404)
+        self.notification_puts.append((short_id, [dict(a) for a in assignments]))
+        self.notifications[short_id] = [dict(a) for a in assignments]
+        return await self.get_schedule_notifications(short_id)
 
     async def run_backup(self, short_id: str) -> str:
         self._check()

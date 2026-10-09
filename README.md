@@ -255,14 +255,15 @@ curl -X POST -H "x-api-key: $SCHEDULER_API_KEY" -H 'X-Zbsched: 1' http://localho
 
 The **Backups** sidebar section (`#/backups`) lists every backup schedule configured in
 zerobyte (a live call, refreshed by **Reload** and after each change): volume →
-repository, zerobyte scheduling, cron, retention policy and last backup.
+repository, zerobyte scheduling, cron, retention policy, notification destinations
+and last backup.
 
 - **Scheduling switch** (`ACTIVE` / `PAUSED`): one click changes it in zerobyte and
   hands the backup over (active → run by zerobyte, paused → run by this service). The
   scheduler reloads its list at once. A schedule without cron ("Manual only") cannot be
   activated.
 - **Checkboxes**, *Select all / none*, then **Activate** / **Pause** (with
-  confirmation) or **Edit retention** for the selection. Each backup is updated on its
+  confirmation), **Edit retention** or **Edit notifications** for the selection. Each backup is updated on its
   own; failures are reported per backup and do not stop the others.
 - **Edit retention** opens zerobyte's *Retention policy* form (keep last / hourly /
   daily / weekly / monthly / yearly; empty = no rule). For one backup the form holds
@@ -270,15 +271,33 @@ repository, zerobyte scheduling, cron, retention policy and last backup.
   value or *mixed*, only the fields you change are applied, and **×** removes a rule on
   all of them. `keepWithinDuration` (not in zerobyte's form either) is never touched.
   A new policy applies at that backup's next successful run (zerobyte's `forget`).
+- **Notifications** opens zerobyte's *Notifications* form: one row per destination
+  with the *Start* / *Success* / *Warnings* / *Failures* switches, *Add notification*
+  and a remove button. Destinations themselves are created in zerobyte; their
+  settings (URLs, tokens) never reach this service's page. For several backups a row
+  shows *on N of M*, a switch whose value differs shows *mixed*, and only what you
+  change is applied: a switch changes that event on the backups that already use the
+  destination, *add to all* also assigns it to the others (with the values shown),
+  a destination picked in *Add notification* goes to all of them, and remove takes it
+  off all of them. A backup with nothing to change is not written.
 
 zerobyte has no partial update: every change is a `GET` of the schedule then a
 `PATCH /api/v1/backups/:shortId` that sends back its `repositoryId`, `cronExpression`,
 `maxRetries` and `retryDelay` (zerobyte would reset the last two otherwise). Check this
-again when upgrading zerobyte.
+again when upgrading zerobyte. Notifications use zerobyte's own routes:
+`GET /api/v1/notifications/destinations`, then `GET` and `PUT
+/api/v1/backups/:shortId/notifications`; the `PUT` replaces the whole list, so each
+backup's list is read, merged and written back. Listing the backups makes one extra
+`GET` per backup for the *Notifications* column, in parallel; if that fails, the list
+still loads and the column shows *Unknown*.
 
 The JSON routes: `GET /api/backups`, `POST /api/backups/scheduling`
 `{"ids": [...], "enabled": true}`, `POST /api/backups/retention`
-`{"ids": [...], "set": {"keepDaily": 7}, "clear": ["keepLast"]}`.
+`{"ids": [...], "set": {"keepDaily": 7}, "clear": ["keepLast"]}`, `POST
+/api/backups/notifications` `{"ids": [...], "set": [{"destinationId": 3,
+"notifyOnSuccess": true, "add": true}], "remove": [5]}` (a `set` item changes only
+the flags it holds; `add` also assigns the destination where it is missing, with
+zerobyte's defaults: warnings and failures on, start and success off).
 
 **Security.** The interface can start and cancel backups and change zerobyte's
 schedules, so:
@@ -318,7 +337,7 @@ ts=2026-10-08T01:12:40.118Z level=info event=finished schedule=abc123 name=Photo
 | `error`, `api_error` | a backup could not be started / the API call failed |
 | `schedule_added`, `schedule_changed`, `schedule_removed`, `refresh_failed` | periodic refresh |
 | `shutdown_inflight` | task left running at shutdown (resumed on restart) |
-| `http_listening`, `ui_login`, `ui_login_failed`, `ui_action` | web interface: listening, sign-ins, actions (`dequeued reason=ui` / `cancel_requested source=ui` follow; Backups pane: `action=scheduling enabled=…` / `action=retention set=… clear=…`, one line per backup) |
+| `http_listening`, `ui_login`, `ui_login_failed`, `ui_action` | web interface: listening, sign-ins, actions (`dequeued reason=ui` / `cancel_requested source=ui` follow; Backups pane: `action=scheduling enabled=…` / `action=retention set=… clear=…` / `action=notifications set=… remove=…`, one line per backup) |
 
 ## Development
 

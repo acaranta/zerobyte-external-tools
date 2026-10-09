@@ -173,3 +173,24 @@ async def test_update_schedule_errors(client):
     )
     with pytest.raises(ZerobyteError, match="require a cron expression"):
         await client.update_schedule("a", {"enabled": True})
+
+
+@respx.mock
+async def test_notifications(client):
+    respx.get(f"{BASE}/api/v1/notifications/destinations").respond(json=[{"id": 1}])
+    assert await client.list_notification_destinations() == [{"id": 1}]
+    respx.get(f"{BASE}/api/v1/backups/a/notifications").respond(json=[{"destinationId": 1}])
+    assert await client.get_schedule_notifications("a") == [{"destinationId": 1}]
+    put = respx.put(f"{BASE}/api/v1/backups/a/notifications").respond(json=[])
+    assignment = {
+        "destinationId": 1,
+        "notifyOnStart": False,
+        "notifyOnSuccess": True,
+        "notifyOnWarning": True,
+        "notifyOnFailure": True,
+    }
+    await client.set_schedule_notifications("a", [assignment])
+    assert json.loads(put.calls.last.request.content) == {"assignments": [assignment]}
+    respx.get(f"{BASE}/api/v1/backups/b/notifications").respond(json={})
+    with pytest.raises(ZerobyteError, match="expected a list"):
+        await client.get_schedule_notifications("b")

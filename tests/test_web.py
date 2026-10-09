@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -6,6 +7,7 @@ import httpx
 import pytest
 
 from fakes import Clock, FakeZerobyte
+from zbsched.client import ZerobyteError
 from zbsched.config import load_settings
 from zbsched.scheduler import Scheduler
 from zbsched.web import COOKIE, SESSION_MAX_AGE, make_session, session_valid, start_web_server
@@ -391,3 +393,144 @@ async def test_status_rows_show_who_runs_them(serve):
     rows = (await http.get("/api/status", headers=AUTH)).json()["schedules"]
     assert {r["short_id"]: (r["run_by"], r["next_run"]) for r in rows}["b"] == ("zerobyte", None)
     assert next(r for r in rows if r["short_id"] == "a")["run_by"] == "zbsched"
+
+
+# ------------------------------------------------------------ backups notifications
+
+
+def dest(i, name, enabled=True):
+    return {
+        "id": i,
+        "name": name,
+        "type": "ntfy",
+        "enabled": enabled,
+        "config": {"type": "ntfy", "token": "secret"},
+    }
+
+
+def flags(start=False, success=False, warning=True, failure=True):
+    return {
+        "notifyOnStart": start,
+        "notifyOnSuccess": success,
+        "notifyOnWarning": warning,
+        "notifyOnFailure": failure,
+    }
+
+
+async def serve_notified(serve):
+    s, fake, clock, http = await serve([zb("a"), zb("b"), zb("c")])
+    fake.destinations = [dest(1, "ntfy-ops"), dest(2, "mail", enabled=False)]
+    fake.notifications = {
+        "a": [{"destinationId": 1, **flags(success=True)}],
+        "b": [{"destinationId": 1, **flags()}, {"destinationId": 2, **flags(start=True)}],
+    }
+    return s, fake, clock, http
+
+
+async def test_backups_list_includes_notifications_without_secrets(serve):
+    _, _, _, http = await serve_notified(serve)
+    body = (await http.get("/api/backups", headers=AUTH)).json()
+    assert body["destinations"] == [
+        {"id": 1, "name": "ntfy-ops", "type": "ntfy", "enabled": True},
+        {"id": 2, "name": "mail", "type": "ntfy", "enabled": False},
+    ]
+    assert "secret" not in json.dumps(body)
+    rows = {r["short_id"]: r["notifications"] for r in body["backups"]}
+    assert rows["a"] == [{"destinationId": 1, **flags(success=True)}]
+    assert len(rows["b"]) == 2
+    assert rows["c"] == []
+    assert body["notifications_error"] is None
+
+
+async def test_backups_list_survives_a_notifications_failure(serve):
+    _, fake, _, http = await serve_notified(serve)
+    fake.notification_errors["b"] = ZerobyteError("GET …/notifications: HTTP 500 boom", 500)
+    body = (await http.get("/api/backups", headers=AUTH)).json()
+    rows = {r["short_id"]: r["notifications"] for r in body["backups"]}
+    assert rows["b"] is None
+    assert rows["a"] is not None
+    assert "boom" in body["notifications_error"]
+
+
+async def test_notifications_bulk_changes_only_what_is_sent(serve, monkeypatch):
+    s, fake, _, http = await serve_notified(serve)
+    refreshes = []
+    monkeypatch.setattr(s, "refresh_now", lambda: refreshes.append(1))
+    r = await http.post(
+        "/api/backups/notifications",
+        json={
+            "ids": ["a", "b", "c"],
+            # turn on "start" where ntfy-ops is used, without adding it to c
+            "set": [{"destinationId": 1, "notifyOnStart": True}],
+            "remove": [2],
+        },
+        headers=AUTH,
+    )
+    assert r.json() == {
+        "ok": True,
+        "results": [{"id": x, "ok": True} for x in ("a", "b", "c")],
+    }
+    assert fake.notifications["a"] == [{"destinationId": 1, **flags(start=True, success=True)}]
+    assert fake.notifications["b"] == [{"destinationId": 1, **flags(start=True)}]
+    # c had nothing to change: no PUT at all
+    assert [sid for sid, _ in fake.notification_puts] == ["a", "b"]
+    assert refreshes == []  # notifications do not concern the scheduler
+
+
+async def test_notifications_bulk_add_uses_zerobyte_defaults(serve):
+    _, fake, _, http = await serve_notified(serve)
+    r = await http.post(
+        "/api/backups/notifications",
+        json={
+            "ids": ["a", "c"],
+            "set": [{"destinationId": 1, "add": True, "notifyOnFailure": False}],
+        },
+        headers=AUTH,
+    )
+    assert r.json()["ok"] is True
+    assert fake.notifications["a"] == [{"destinationId": 1, **flags(success=True, failure=False)}]
+    assert fake.notifications["c"] == [{"destinationId": 1, **flags(failure=False)}]
+
+
+async def test_notifications_bulk_reports_each_failure(serve):
+    _, _, _, http = await serve_notified(serve)
+    r = await http.post(
+        "/api/backups/notifications",
+        json={"ids": ["a", "zz", "c"], "set": [{"destinationId": 9, "add": True}]},
+        headers=AUTH,
+    )
+    body = r.json()
+    assert body["ok"] is False
+    assert [x["ok"] for x in body["results"]] == [False, False, False]
+    assert "not found" in body["results"][0]["error"]
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ({"ids": ["a"]}, "nothing to change"),
+        ({"ids": ["a"], "set": {}}, "must be lists"),
+        ({"ids": ["a"], "set": [{"destinationId": "1", "notifyOnStart": True}]}, "destinationId"),
+        ({"ids": ["a"], "set": [{"destinationId": True, "add": True}]}, "destinationId"),
+        ({"ids": ["a"], "set": [{"destinationId": 1, "config": {}}]}, "unknown"),
+        ({"ids": ["a"], "set": [{"destinationId": 1, "notifyOnStart": 1}]}, "true or false"),
+        ({"ids": ["a"], "set": [{"destinationId": 1}]}, "nothing to change for"),
+        ({"ids": ["a"], "set": [{"destinationId": 1, "add": False}]}, "nothing to change for"),
+        (
+            {
+                "ids": ["a"],
+                "set": [{"destinationId": 1, "add": True}, {"destinationId": 1, "add": True}],
+            },
+            "twice",
+        ),
+        ({"ids": ["a"], "remove": [1, 1]}, "distinct"),
+        ({"ids": ["a"], "remove": [0]}, "distinct"),
+        ({"ids": ["a"], "set": [{"destinationId": 1, "add": True}], "remove": [1]}, "both"),
+    ],
+)
+async def test_notifications_validation(serve, body, message):
+    _, fake, _, http = await serve_notified(serve)
+    r = await http.post("/api/backups/notifications", json=body, headers=AUTH)
+    assert r.status_code == 400
+    assert message in r.json()["error"]
+    assert fake.notification_puts == []

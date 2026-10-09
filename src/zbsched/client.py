@@ -145,6 +145,28 @@ class ZerobyteClient:
         result = await self._json("PATCH", f"/api/v1/backups/{short_id}", json=body)
         return result if isinstance(result, dict) else {}
 
+    async def list_notification_destinations(self) -> list[dict[str, Any]]:
+        body = await self._json("GET", "/api/v1/notifications/destinations")
+        if not isinstance(body, list):
+            raise ZerobyteError("GET /api/v1/notifications/destinations: expected a list")
+        return body
+
+    async def get_schedule_notifications(self, short_id: str) -> list[dict[str, Any]]:
+        """The schedule's notification assignments (one per destination, four event flags)."""
+        path = f"/api/v1/backups/{short_id}/notifications"
+        body = await self._json("GET", path)
+        if not isinstance(body, list):
+            raise ZerobyteError(f"GET {path}: expected a list")
+        return body
+
+    async def set_schedule_notifications(
+        self, short_id: str, assignments: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Replace all the schedule's assignments (zerobyte deletes then inserts them)."""
+        path = f"/api/v1/backups/{short_id}/notifications"
+        body = await self._json("PUT", path, json={"assignments": assignments})
+        return body if isinstance(body, list) else []
+
     async def run_backup(self, short_id: str) -> str:
         """Start a manual backup and return its task id."""
         body = await self._json("POST", f"/api/v1/backups/{short_id}/run")

@@ -310,6 +310,37 @@ dialog.card::backdrop { background: rgba(0, 0, 0, .6); }
 .dlg-errors li + li { margin-top: 4px; }
 .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
 
+/* ---- notifications dialog (zerobyte "Notifications" card) */
+.nt-add { display: flex; gap: 8px; margin-bottom: 16px; }
+.nt-add select {
+  flex: 1; min-width: 0; max-width: 360px; height: 32px; padding: 0 8px; font: inherit; font-size: 13px;
+  border: 1px solid var(--input); border-radius: 6px; background: var(--card); color: var(--foreground);
+}
+.nt-table { border: 1px solid var(--border); }
+.nt-table th, .nt-table td { vertical-align: middle; }
+.nt-table th.ev, .nt-table td.ev { text-align: center; width: 1%; }
+.nt-table th:first-child, .nt-table td:first-child { padding-left: 12px; }
+.nt-table th:last-child, .nt-table td:last-child { padding-right: 12px; width: 1%; }
+.nt-table tr.removed .dname, .nt-table tr.removed .sub { text-decoration: line-through; opacity: .6; }
+.dname { font-weight: 600; }
+.badge { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 10px; text-transform: uppercase; color: var(--muted-foreground); vertical-align: 1px; }
+.badge.off { color: var(--destructive); border-color: color-mix(in oklab, var(--destructive) 40%, transparent); }
+.nt-empty { padding: 24px; text-align: center; color: var(--muted-foreground); font-size: 13px; border: 1px dashed var(--border); }
+.nt-table .partial { height: 22px; margin-top: 4px; padding: 0 8px; font-size: 10px; }
+.nt-table .partial[aria-pressed="true"] { color: var(--success); border-color: var(--success); }
+.nt-table .trash { width: 28px; height: 28px; padding: 0; font-size: 15px; text-transform: none; border-color: transparent; color: var(--muted-foreground); }
+.nt-table .trash:hover:not(:disabled) { color: var(--destructive); }
+/* zerobyte Switch; aria-checked="mixed" when the selected backups differ */
+.sw { width: 40px; height: 24px; padding: 2px; border-radius: 999px; background: var(--muted); border-color: transparent; justify-content: flex-start; }
+.sw::after { content: ""; width: 18px; height: 18px; border-radius: 50%; background: var(--foreground); transition: transform .15s; }
+.sw[aria-checked="true"] { background: var(--success); }
+.sw[aria-checked="true"]::after { transform: translateX(16px); background: #fff; }
+.sw[aria-checked="mixed"]::after { transform: translateX(8px); opacity: .5; }
+.sw:hover:not(:disabled) { background: color-mix(in oklab, var(--muted) 70%, var(--foreground)); }
+.sw[aria-checked="true"]:hover:not(:disabled) { background: color-mix(in oklab, var(--success) 85%, #fff); }
+.sw.changed { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px color-mix(in oklab, var(--strong-accent) 70%, transparent); }
+.notif-list { max-width: 28ch; overflow-wrap: anywhere; }
+
 /* ---- login */
 .login-page { position: relative; min-height: 100dvh; display: flex; align-items: flex-start; justify-content: center; padding: 14vh 16px 0; }
 .login { position: relative; width: 100%; max-width: 400px; }
@@ -359,6 +390,16 @@ dialog.card::backdrop { background: rgba(0, 0, 0, .6); }
   .actions { justify-content: flex-start; padding-top: 6px; }
   .toolbar { padding: 0 16px 12px; }
   td.chk { float: right; padding: 4px 16px 0 0; }
+  /* the notifications grid stays a table: its switches need the column headers */
+  .nt-table { display: table; }
+  .nt-table thead { display: table-header-group; }
+  .nt-table tbody { display: table-row-group; }
+  .nt-table tr { display: table-row; padding: 0; }
+  .nt-table th, .nt-table td, .nt-table td:first-child, .nt-table td:last-child { display: table-cell; padding: 8px 4px; border-bottom: 1px solid var(--border); }
+  .nt-table th { font-size: 10px; }
+  .nt-table .sw { width: 34px; }
+  .nt-table .sw[aria-checked="true"]::after { transform: translateX(10px); }
+  .nt-table .sw[aria-checked="mixed"]::after { transform: translateX(5px); }
 }
 </style>
 </head>
@@ -471,15 +512,16 @@ dialog.card::backdrop { background: rgba(0, 0, 0, .6); }
           <button id="bk-activate" type="button" title="Let zerobyte schedule the selected backups">Activate</button>
           <button id="bk-pause" type="button" title="Pause zerobyte scheduling: zbsched runs them">Pause</button>
           <button id="bk-retention" type="button">Edit retention</button>
+          <button id="bk-notify" type="button">Edit notifications</button>
         </div>
         <table>
           <thead>
             <tr>
               <th class="chk"><input type="checkbox" id="bk-head" aria-label="Select all backups"></th>
-              <th>Backup</th><th>Scheduling</th><th>Cron</th><th>Retention</th><th>Last backup</th><th><span hidden>Actions</span></th>
+              <th>Backup</th><th>Scheduling</th><th>Cron</th><th>Retention</th><th>Notifications</th><th>Last backup</th><th><span hidden>Actions</span></th>
             </tr>
           </thead>
-          <tbody id="bk-rows"><tr><td colspan="7" class="empty-table">Loading…</td></tr></tbody>
+          <tbody id="bk-rows"><tr><td colspan="8" class="empty-table">Loading…</td></tr></tbody>
         </table>
       </section>
     </div>
@@ -498,6 +540,24 @@ dialog.card::backdrop { background: rgba(0, 0, 0, .6); }
     <div class="dlg-foot">
       <button type="button" id="ret-cancel">Cancel</button>
       <button type="submit" class="primary" id="ret-save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="card" id="nt-dialog" aria-labelledby="nt-title">
+  <form id="nt-form" method="dialog" novalidate>
+    <h2 class="card-title" id="nt-title">Notifications</h2>
+    <p class="card-desc" id="nt-desc">Configure which notifications to send for this backup schedule.</p>
+    <div class="dlg-body">
+      <div class="nt-add" id="nt-add">
+        <select id="nt-pick" aria-label="Add a notification destination"></select>
+      </div>
+      <div id="nt-list"></div>
+      <ul class="dlg-errors" id="nt-errors" role="alert" hidden></ul>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" id="nt-cancel">Cancel</button>
+      <button type="submit" class="primary" id="nt-save">Save changes</button>
     </div>
   </form>
 </dialog>
@@ -791,6 +851,8 @@ const RETENTION = [
 ];
 
 let backupList = [];
+let destinations = null; // zerobyte notification destinations (null: could not be read)
+let notifyError = null;
 const selected = new Set();
 let bkBusy = false;
 
@@ -809,12 +871,14 @@ async function loadBackups() {
     if (status !== 200) throw new Error(data.error || `HTTP ${status}`);
     showApp();
     backupList = data.backups;
+    destinations = data.destinations;
+    notifyError = data.notifications_error;
     const known = new Set(backupList.map((b) => b.short_id));
     for (const id of [...selected]) if (!known.has(id)) selected.delete(id);
     renderBackups();
   } catch (e) {
     toast(`Cannot load the backups: ${e.message}`, true);
-    if (!backupList.length) $("bk-rows").replaceChildren(el("tr", {}, el("td", { colspan: "7", class: "empty-table", text: `Cannot load the backups: ${e.message}` })));
+    if (!backupList.length) $("bk-rows").replaceChildren(el("tr", {}, el("td", { colspan: "8", class: "empty-table", text: `Cannot load the backups: ${e.message}` })));
   } finally {
     $("bk-reload").disabled = false;
   }
@@ -827,7 +891,7 @@ function syncSelection() {
   $("bk-all").textContent = all ? "Select none" : "Select all";
   $("bk-head").checked = all;
   $("bk-head").indeterminate = n > 0 && !all;
-  for (const id of ["bk-activate", "bk-pause", "bk-retention"]) $(id).disabled = n === 0 || bkBusy;
+  for (const id of ["bk-activate", "bk-pause", "bk-retention", "bk-notify"]) $(id).disabled = n === 0 || bkBusy;
   for (const tr of $("bk-rows").children) {
     const box = tr.querySelector("input[type=checkbox]");
     if (box) { box.checked = selected.has(tr.dataset.id); tr.classList.toggle("sel", box.checked); }
@@ -856,7 +920,7 @@ function onOff(b) {
 
 function renderBackups() {
   if (!backupList.length) {
-    $("bk-rows").replaceChildren(el("tr", {}, el("td", { colspan: "7", class: "empty-table", text: "No backup schedules in zerobyte." })));
+    $("bk-rows").replaceChildren(el("tr", {}, el("td", { colspan: "8", class: "empty-table", text: "No backup schedules in zerobyte." })));
     syncSelection();
     return;
   }
@@ -872,8 +936,12 @@ function renderBackups() {
     el("td", { "data-label": "Scheduling" }, onOff(b)),
     el("td", { "data-label": "Cron" }, b.cron ? el("code", { class: "cron", text: b.cron }) : el("span", { class: "manual", text: "Manual only" })),
     el("td", { "data-label": "Retention", text: retentionText(b.retention) }),
+    el("td", { "data-label": "Notifications" }, notifyCell(b)),
     el("td", { "data-label": "Last backup" }, lastCell({ last: { status: b.last_status, finished_at: b.last_backup_at } })),
-    el("td", {}, el("div", { class: "actions" }, el("button", { type: "button", onclick: () => openRetention([b.short_id]), text: "Edit retention" }))),
+    el("td", {}, el("div", { class: "actions" },
+      el("button", { type: "button", onclick: () => openRetention([b.short_id]), text: "Edit retention" }),
+      el("button", { type: "button", onclick: () => openNotifications([b.short_id]), text: "Notifications" }),
+    )),
   )));
   syncSelection();
 }
@@ -1028,6 +1096,201 @@ $("ret-form").addEventListener("submit", async (ev) => {
   $("ret-errors").hidden = false;
 });
 
+// ---- notifications dialog
+
+// zerobyte's events, in its column order, and the switches it gives a new destination.
+const EVENTS = [
+  { key: "notifyOnStart", label: "Start" },
+  { key: "notifyOnSuccess", label: "Success" },
+  { key: "notifyOnWarning", label: "Warnings" },
+  { key: "notifyOnFailure", label: "Failures" },
+];
+const EVENT_DEFAULTS = { notifyOnStart: false, notifyOnSuccess: false, notifyOnWarning: true, notifyOnFailure: true };
+
+function destName(id) {
+  const d = (destinations || []).find((x) => x.id === id);
+  return d ? d.name : `#${id}`;
+}
+
+function notifyCell(b) {
+  if (b.notifications === null) return el("span", { class: "manual", title: notifyError || "", text: "Unknown" });
+  if (!b.notifications.length) return el("span", { class: "manual", text: "None" });
+  const on = (a) => EVENTS.filter((e) => a[e.key]).map((e) => e.label.toLowerCase()).join(", ") || "no event";
+  return el("span", {
+    class: "notif-list",
+    title: b.notifications.map((a) => `${destName(a.destinationId)}: ${on(a)}`).join("\n"),
+    text: b.notifications.map((a) => destName(a.destinationId)).join(", "),
+  });
+}
+
+// One row per destination shown in the dialog. For each event, `orig` is its value on the
+// selected backups that use the destination (true, false or "mixed") and `cur` what the
+// form shows now. `count` = how many selected backups use it; `add` = also assign it to
+// the others; `removed` = take it off all of them.
+let ntIds = [];
+let ntRows = [];
+
+function openNotifications(ids) {
+  const chosen = backupList.filter((b) => ids.includes(b.short_id));
+  if (destinations === null || chosen.some((b) => b.notifications === null)) {
+    toast(`Cannot read the notifications from zerobyte${notifyError ? `: ${notifyError}` : "."} Reload and try again.`, true);
+    return;
+  }
+  ntIds = ids;
+  const byDest = new Map();
+  for (const b of chosen) for (const a of b.notifications) {
+    if (!byDest.has(a.destinationId)) byDest.set(a.destinationId, []);
+    byDest.get(a.destinationId).push(a);
+  }
+  ntRows = [...byDest].map(([id, list]) => {
+    const orig = {};
+    for (const e of EVENTS) {
+      const values = new Set(list.map((a) => a[e.key]));
+      orig[e.key] = values.size === 1 ? [...values][0] : "mixed";
+    }
+    return { id, count: list.length, orig, cur: { ...orig }, add: false, removed: false };
+  });
+  ntRows.sort((x, y) => destName(x.id).localeCompare(destName(y.id)));
+  const multi = ids.length > 1;
+  $("nt-title").textContent = multi ? `Notifications — ${ids.length} backups` : "Notifications";
+  $("nt-desc").textContent = multi
+    ? "Only what you change is applied: a switch on a destination changes it on the backups that use it, and \"add to all\" assigns it to the others."
+    : `Configure which notifications to send for ${chosen[0] ? chosen[0].name : ids[0]}.`;
+  $("nt-errors").hidden = true;
+  renderNotifications();
+  $("nt-dialog").showModal();
+}
+
+function nextValue(row, key) {
+  const v = row.cur[key];
+  if (v === "mixed") return true;
+  if (v === true) return false;
+  return row.orig[key] === "mixed" ? "mixed" : true;
+}
+
+function eventSwitch(row, e) {
+  const v = row.cur[e.key];
+  const state = v === "mixed" ? "mixed" : String(v);
+  const name = destName(row.id);
+  return el("button", {
+    type: "button", role: "switch", class: `sw${row.count && v !== row.orig[e.key] ? " changed" : ""}`,
+    "aria-checked": state, "aria-label": `${e.label} notifications to ${name}`,
+    title: v === "mixed" ? "Differs between the selected backups: click to set it on all" : "",
+    disabled: row.removed,
+    onclick: () => { row.cur[e.key] = nextValue(row, e.key); renderNotifications(); },
+  });
+}
+
+function renderNotifications() {
+  const total = ntIds.length;
+  const shown = new Set(ntRows.map((r) => r.id));
+  const free = (destinations || []).filter((d) => !shown.has(d.id));
+  $("nt-add").hidden = free.length === 0;
+  $("nt-pick").replaceChildren(
+    el("option", { value: "", text: "Add notification…" }),
+    ...free.map((d) => el("option", { value: String(d.id), text: `${d.name} (${d.type})${d.enabled ? "" : " — disabled"}` })),
+  );
+  if (!ntRows.length) {
+    $("nt-list").replaceChildren(el("div", { class: "nt-empty", text: destinations.length
+      ? `No notifications configured for ${total > 1 ? "these schedules" : "this schedule"}. Pick a destination above to add one.`
+      : "No notification destination exists in zerobyte yet: create one in zerobyte's Notifications page." }));
+    syncNotifySave();
+    return;
+  }
+  $("nt-list").replaceChildren(el("table", { class: "nt-table" },
+    el("thead", {}, el("tr", {}, el("th", { text: "Destination" }), ...EVENTS.map((e) => el("th", { class: "ev", text: e.label })), el("th", {}, el("span", { hidden: true, text: "Remove" })))),
+    el("tbody", {}, ...ntRows.map((row) => {
+      const d = (destinations || []).find((x) => x.id === row.id);
+      const partial = total > 1 && row.count > 0 && row.count < total;
+      let note = null;
+      if (row.count === 0) note = el("span", { class: "sub", text: total > 1 ? `new: added to all ${total}` : "new" });
+      else if (partial) note = el("span", { class: "sub" }, `on ${row.count} of ${total} `, el("button", {
+        type: "button", class: "partial", "aria-pressed": String(row.add), disabled: row.removed,
+        title: "Also assign this destination to the selected backups that do not use it yet",
+        onclick: () => { row.add = !row.add; renderNotifications(); },
+        text: row.add ? "added to all" : "add to all",
+      }));
+      if (row.removed) note = el("span", { class: "sub", text: total > 1 ? `removed from ${row.count}` : "removed" });
+      return el("tr", { class: row.removed ? "removed" : "" },
+        el("td", {},
+          el("span", { class: "dname", text: d ? d.name : `#${row.id}` }),
+          d ? el("span", { class: `badge${d.enabled ? "" : " off"}`, text: d.enabled ? d.type : `${d.type} · disabled` }) : null,
+          note,
+        ),
+        ...EVENTS.map((e) => el("td", { class: "ev" }, eventSwitch(row, e))),
+        el("td", {}, el("button", {
+          type: "button", class: "trash", "aria-label": row.removed ? `Keep ${destName(row.id)}` : `Remove ${destName(row.id)}`,
+          title: row.removed ? "Keep it" : (total > 1 ? "Remove this destination from all selected backups" : "Remove"),
+          text: row.removed ? "↺" : "🗑",
+          onclick: () => {
+            if (row.count === 0) ntRows = ntRows.filter((r) => r !== row);
+            else row.removed = !row.removed;
+            renderNotifications();
+          },
+        })),
+      );
+    })),
+  ));
+  syncNotifySave();
+}
+
+// The change to send: {set: [{destinationId, add?, <changed flags>}], remove: [ids]}.
+function notifyChange() {
+  const set = [];
+  const remove = [];
+  for (const row of ntRows) {
+    if (row.removed) { remove.push(row.id); continue; }
+    const item = { destinationId: row.id };
+    const adding = row.count === 0 || row.add;
+    for (const e of EVENTS) {
+      const v = row.cur[e.key];
+      // when assigning it to more backups, send every set value so they all match
+      if (v !== "mixed" && (adding || v !== row.orig[e.key])) item[e.key] = v;
+    }
+    if (adding) item.add = true;
+    if (Object.keys(item).length > 1) set.push(item);
+  }
+  return { set, remove };
+}
+
+function syncNotifySave() {
+  const { set, remove } = notifyChange();
+  $("nt-save").disabled = bkBusy || (!set.length && !remove.length);
+  $("nt-save").textContent = ntIds.length > 1 ? `Apply to ${ntIds.length}` : "Save changes";
+}
+
+$("nt-pick").addEventListener("change", (ev) => {
+  const id = Number(ev.target.value);
+  if (!id) return;
+  ntRows.push({ id, count: 0, orig: { ...EVENT_DEFAULTS }, cur: { ...EVENT_DEFAULTS }, add: true, removed: false });
+  renderNotifications();
+});
+
+$("nt-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const { set, remove } = notifyChange();
+  if (!set.length && !remove.length) { $("nt-dialog").close(); return; }
+  const multi = ntIds.length > 1;
+  $("nt-save").disabled = true;
+  const results = await bulk("notifications", { ids: ntIds, set, remove });
+  syncNotifySave();
+  if (!results) return;
+  const failed = results.filter((r) => !r.ok);
+  if (!failed.length) {
+    $("nt-dialog").close();
+    toast(multi ? `Notifications updated on ${plural(results.length, "backup")}.` : "Notification settings saved.");
+    return;
+  }
+  const name = names(ntIds);
+  $("nt-errors").replaceChildren(
+    el("li", { text: `${results.length - failed.length} of ${results.length} saved. Not saved:` }),
+    ...failed.map((r) => el("li", { text: `${name(r.id)}: ${r.error}` })),
+  );
+  $("nt-errors").hidden = false;
+});
+
+$("nt-cancel").addEventListener("click", () => $("nt-dialog").close());
+$("bk-notify").addEventListener("click", () => openNotifications([...selected]));
 $("ret-cancel").addEventListener("click", () => $("ret-dialog").close());
 $("bk-reload").addEventListener("click", loadBackups);
 $("bk-all").addEventListener("click", () => setAll(selected.size !== backupList.length));
