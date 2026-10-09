@@ -272,13 +272,14 @@ and last backup.
   all of them. `keepWithinDuration` (not in zerobyte's form either) is never touched.
   A new policy applies at that backup's next successful run (zerobyte's `forget`).
 - **Notifications** opens zerobyte's *Notifications* form: one row per destination
-  with the *Start* / *Success* / *Warnings* / *Failures* switches, *Add notification*
-  and a remove button. Destinations themselves are created in zerobyte; their
+  with the *Start* / *Success* / *Warnings* / *Failures* switches and a remove button.
+  **+ Add notification** opens a destination picker; pick one, then click **+** again
+  to add another, as long as unassigned destinations remain. Destinations themselves are created in zerobyte; their
   settings (URLs, tokens) never reach this service's page. For several backups a row
   shows *on N of M*, a switch whose value differs shows *mixed*, and only what you
   change is applied: a switch changes that event on the backups that already use the
   destination, *add to all* also assigns it to the others (with the values shown),
-  a destination picked in *Add notification* goes to all of them, and remove takes it
+  a destination added with **+** goes to all of them, and remove takes it
   off all of them. A backup with nothing to change is not written.
 
 zerobyte has no partial update: every change is a `GET` of the schedule then a

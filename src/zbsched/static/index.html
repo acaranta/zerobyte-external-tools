@@ -311,6 +311,7 @@ dialog.card::backdrop { background: rgba(0, 0, 0, .6); }
 .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
 
 /* ---- notifications dialog (zerobyte "Notifications" card) */
+.nt-head { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 .nt-add { display: flex; gap: 8px; margin-bottom: 16px; }
 .nt-add select {
   flex: 1; min-width: 0; max-width: 360px; height: 32px; padding: 0 8px; font: inherit; font-size: 13px;
@@ -549,8 +550,10 @@ dialog.card::backdrop { background: rgba(0, 0, 0, .6); }
     <h2 class="card-title" id="nt-title">Notifications</h2>
     <p class="card-desc" id="nt-desc">Configure which notifications to send for this backup schedule.</p>
     <div class="dlg-body">
-      <div class="nt-add" id="nt-add">
+      <div class="nt-head"><button type="button" id="nt-new"><span aria-hidden="true">+</span> Add notification</button></div>
+      <div class="nt-add" id="nt-add" hidden>
         <select id="nt-pick" aria-label="Add a notification destination"></select>
+        <button type="button" id="nt-pick-cancel" class="ghost">Cancel</button>
       </div>
       <div id="nt-list"></div>
       <ul class="dlg-errors" id="nt-errors" role="alert" hidden></ul>
@@ -1129,6 +1132,7 @@ function notifyCell(b) {
 // the others; `removed` = take it off all of them.
 let ntIds = [];
 let ntRows = [];
+let ntPicking = false; // the "Add notification" picker is open
 
 function openNotifications(ids) {
   const chosen = backupList.filter((b) => ids.includes(b.short_id));
@@ -1137,6 +1141,7 @@ function openNotifications(ids) {
     return;
   }
   ntIds = ids;
+  ntPicking = false;
   const byDest = new Map();
   for (const b of chosen) for (const a of b.notifications) {
     if (!byDest.has(a.destinationId)) byDest.set(a.destinationId, []);
@@ -1185,14 +1190,18 @@ function renderNotifications() {
   const total = ntIds.length;
   const shown = new Set(ntRows.map((r) => r.id));
   const free = (destinations || []).filter((d) => !shown.has(d.id));
-  $("nt-add").hidden = free.length === 0;
+  // zerobyte's flow: "+ Add notification" opens a picker, which closes after each pick;
+  // the button comes back while destinations remain, so any number can be added.
+  if (!free.length) ntPicking = false;
+  $("nt-new").hidden = ntPicking || !free.length;
+  $("nt-add").hidden = !ntPicking;
   $("nt-pick").replaceChildren(
-    el("option", { value: "", text: "Add notification…" }),
+    el("option", { value: "", text: "Select a notification destination…" }),
     ...free.map((d) => el("option", { value: String(d.id), text: `${d.name} (${d.type})${d.enabled ? "" : " — disabled"}` })),
   );
   if (!ntRows.length) {
     $("nt-list").replaceChildren(el("div", { class: "nt-empty", text: destinations.length
-      ? `No notifications configured for ${total > 1 ? "these schedules" : "this schedule"}. Pick a destination above to add one.`
+      ? `No notifications configured for ${total > 1 ? "these schedules" : "this schedule"}. Click "+ Add notification" to get started.`
       : "No notification destination exists in zerobyte yet: create one in zerobyte's Notifications page." }));
     syncNotifySave();
     return;
@@ -1263,7 +1272,21 @@ $("nt-pick").addEventListener("change", (ev) => {
   const id = Number(ev.target.value);
   if (!id) return;
   ntRows.push({ id, count: 0, orig: { ...EVENT_DEFAULTS }, cur: { ...EVENT_DEFAULTS }, add: true, removed: false });
+  ntPicking = false;
   renderNotifications();
+  $("nt-new").hidden ? $("nt-save").focus() : $("nt-new").focus();
+});
+
+$("nt-new").addEventListener("click", () => {
+  ntPicking = true;
+  renderNotifications();
+  $("nt-pick").focus();
+});
+
+$("nt-pick-cancel").addEventListener("click", () => {
+  ntPicking = false;
+  renderNotifications();
+  $("nt-new").focus();
 });
 
 $("nt-form").addEventListener("submit", async (ev) => {
