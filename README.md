@@ -215,14 +215,16 @@ result, and a warning if the schedule is still enabled in zerobyte. The page ref
 every 5 seconds, from the scheduler's memory only: it makes no zerobyte API call.
 
 The page uses zerobyte's look (colours, cards, buttons and its *Google Sans Code* font),
-dark by default; the sun/moon button switches to the light theme and the browser
-remembers the choice. The font is bundled (`src/zbsched/static/google-sans-code.woff2`,
+dark by default, with the same sidebar: **Scheduler** is its first section
+(`#/scheduler`). The panel button in the top bar (or Ctrl+B) collapses the sidebar to
+icons; on a phone it opens it as a drawer. The sidebar footer holds the light/dark
+switch and *Log out*. The browser remembers the theme and the sidebar state. The font is bundled (`src/zbsched/static/google-sans-code.woff2`,
 SIL Open Font License 1.1, see `google-sans-code-OFL.txt` next to it) and served at
 `/static/google-sans-code.woff2`, so the page loads nothing from outside.
 
 | Button | Effect |
 |---|---|
-| **Refresh schedules** | reload the schedule list from zerobyte and the schedules file now. On an error the previous list is kept and the problem is shown |
+| **Refresh schedules** (top right of the *Backup queue* card) | reload the schedule list from zerobyte and the schedules file now. On an error the previous list is kept and the problem is shown |
 | **Run next** / **Move first** | put the schedule at the head of the queue (`trigger=manual`). It still waits for a free slot, so `MAX_CONCURRENT` and the cool-down still apply |
 | **Run now** | start the backup right away (`trigger=forced`), even if every slot is taken. Asks for confirmation |
 | **Cancel** | cancel the active backup in zerobyte (also one started from the zerobyte UI). The backup is then logged as `finished status=cancelled`, followed by the normal cool-down, and never retried |

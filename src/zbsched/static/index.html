@@ -8,8 +8,11 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='3' width='6' height='10' rx='1' fill='%23ff543a'/%3E%3Crect x='9' y='3' width='6' height='10' rx='1' fill='none' stroke='%23a1a1a1' stroke-width='1.5'/%3E%3C/svg%3E">
 <link rel="preload" href="/static/google-sans-code.woff2" as="font" type="font/woff2" crossorigin>
 <script>
-  // Apply the saved theme before the first paint (dark by default, like zerobyte).
-  try { if (localStorage.getItem("zbsched-theme") === "light") document.documentElement.classList.remove("dark"); } catch (_) { /* storage blocked */ }
+  // Apply the saved theme and sidebar state before the first paint (dark and open by default, like zerobyte).
+  try {
+    if (localStorage.getItem("zbsched-theme") === "light") document.documentElement.classList.remove("dark");
+    if (localStorage.getItem("zbsched-sidebar") === "collapsed") document.documentElement.classList.add("sb-collapsed");
+  } catch (_) { /* storage blocked */ }
 </script>
 <style>
 /* Look and feel copied from zerobyte v0.43.1 (app/app.css + shadcn "new-york" components). */
@@ -33,6 +36,8 @@
   --input: oklch(0.9 0.01 260);
   --ring: oklch(0.7 0.01 260);
   --grid: rgba(0, 0, 0, .04);
+  --sidebar: #ffffff;
+  --sidebar-accent: oklch(0.97 0.005 260);
   --strong-accent: #ff543a;
   --destructive: oklch(0.577 0.245 27.325);
   --success: oklch(0.57 0.16 148);
@@ -55,6 +60,8 @@
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
   --grid: #262626;
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
   --destructive: #ff543a;
   --success: oklch(0.696 0.17 162.48);
   --run: #60a5fa;
@@ -104,14 +111,56 @@ button.danger:hover:not(:disabled) { background: var(--destructive); color: #fff
 button.icon { width: 32px; padding: 0; }
 button svg { width: 16px; height: 16px; flex: none; }
 
+/* ---- app shell: sidebar + main column (zerobyte layout) */
+.shell { display: flex; min-height: 100dvh; }
+.main { flex: 1; min-width: 0; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; color: inherit; text-decoration: none; white-space: nowrap; }
+.brand svg { width: 22px; height: 22px; flex: none; color: var(--strong-accent); }
+
+/* ---- sidebar (zerobyte AppSidebar): 14rem, collapses to an icon rail */
+.sidebar {
+  position: sticky; top: 0; align-self: flex-start; z-index: 60;
+  width: 14rem; height: 100dvh; flex: none;
+  display: flex; flex-direction: column;
+  background: var(--sidebar); border-right: 1px solid var(--border);
+  transition: width .2s ease-in-out;
+}
+.sb-head { height: 65px; flex: none; display: flex; align-items: center; padding: 0 16px; background: var(--card-header); border-bottom: 1px solid var(--border); overflow: hidden; }
+.sb-nav { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.sb-item {
+  position: relative; overflow: hidden;
+  display: flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 8px; border-radius: 6px;
+  color: var(--muted-foreground); text-decoration: none; font-size: 14px; white-space: nowrap;
+  transition: background-color .15s, color .15s;
+}
+.sb-item:hover { background: var(--sidebar-accent); color: var(--foreground); }
+.sb-item svg { width: 16px; height: 16px; flex: none; transition: margin .2s; }
+.sb-item[aria-current="page"] { background: color-mix(in oklab, var(--strong-accent) 10%, transparent); color: var(--foreground); font-weight: 500; }
+.sb-item[aria-current="page"] svg { color: var(--strong-accent); margin-left: 4px; }
+.sb-item[aria-current="page"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--strong-accent); }
+.sb-foot { flex: none; display: flex; justify-content: space-between; gap: 8px; padding: 8px; border-top: 1px solid var(--border); }
+.sb-action { width: 40px; height: 40px; padding: 0; border: 0; border-radius: 4px; color: var(--muted-foreground); }
+.sb-action:hover:not(:disabled) { background: var(--sidebar-accent); color: var(--foreground); }
+.backdrop { display: none; }
+@media (min-width: 761px) {
+  .sb-collapsed .sidebar { width: 57px; }
+  .sb-collapsed .sb-head { justify-content: center; padding: 0; }
+  .sb-collapsed .sb-text { display: none; }
+  .sb-collapsed .sb-item { justify-content: center; padding: 0; }
+  .sb-collapsed .sb-item[aria-current="page"] svg { margin-left: 0; }
+  .sb-collapsed .sb-item[aria-current="page"]::before { display: none; }
+  .sb-collapsed .sb-foot { flex-direction: column; align-items: center; }
+}
+
 /* ---- top bar (zerobyte layout header) */
 .topbar { position: sticky; top: 0; z-index: 50; height: 65px; background: var(--card-header); border-bottom: 1px solid var(--border); }
-.topbar .in { height: 100%; max-width: 1280px; margin: 0 auto; padding: 0 16px; display: flex; align-items: center; gap: 16px; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
-.brand svg { width: 22px; height: 22px; color: var(--strong-accent); }
-.crumb { color: var(--muted-foreground); font-size: 14px; }
+.topbar .in { height: 100%; max-width: 1280px; margin: 0 auto; padding: 0 16px; display: flex; align-items: center; gap: 12px; }
+.ghost { border-color: transparent; color: var(--muted-foreground); }
+.ghost:hover:not(:disabled) { color: var(--foreground); }
+.crumb { min-width: 0; color: var(--muted-foreground); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .crumb b { color: var(--foreground); font-weight: 500; }
-.tools { display: flex; gap: 8px; margin-left: auto; }
+.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 
 /* ---- grid background (zerobyte GridBackground) */
 .grid { position: relative; min-height: calc(100dvh - 65px); }
@@ -246,9 +295,12 @@ td .sub { display: block; font-size: 12px; color: var(--muted-foreground); }
 .dark #theme .moon { display: none; }
 
 @media (max-width: 760px) {
-  .topbar .in { gap: 10px; }
-  .crumb { display: none; }
-  .tools .label-long { display: none; }
+  /* the sidebar becomes a drawer over the page */
+  .sidebar { position: fixed; left: 0; top: 0; width: 18rem; max-width: 85vw; transform: translateX(-100%); transition: transform .2s ease-in-out; }
+  .sb-open .sidebar { transform: none; }
+  .sb-open .backdrop { display: block; position: fixed; inset: 0; z-index: 55; background: rgba(0, 0, 0, .5); }
+  .topbar .in { gap: 8px; }
+  .label-long { display: none; }
   .card { padding: 16px; }
   .rail { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .table-card { padding: 0; }
@@ -265,15 +317,19 @@ td .sub { display: block; font-size: 12px; color: var(--muted-foreground); }
 <body>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <!-- lucide "calendar-clock" (zerobyte's Backups icon), "sun", "moon" -->
-  <symbol id="i-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h5"/><path d="M17.5 17.5 16 16.3V14"/><circle cx="16" cy="16" r="6"/></symbol>
+  <!-- brand: two slots, one taken (same as the favicon) -->
+  <symbol id="i-brand" viewBox="0 0 16 16"><rect x="1" y="3" width="6" height="10" rx="1" fill="currentColor"/><rect x="9" y="3" width="6" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/></symbol>
+  <!-- lucide "calendar-clock" (zerobyte's Backups icon), "sun", "moon", "panel-left", "log-out" -->
+  <symbol id="i-sched" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h5"/><path d="M17.5 17.5 16 16.3V14"/><circle cx="16" cy="16" r="6"/></symbol>
   <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
   <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></symbol>
 </svg>
 
 <section class="login-page grid" id="login" hidden>
   <div class="login card">
-    <div class="brand"><svg aria-hidden="true"><use href="#i-logo"/></svg>zbsched</div>
+    <div class="brand"><svg aria-hidden="true"><use href="#i-brand"/></svg>zbsched</div>
     <h1 class="card-title">Sign in</h1>
     <p class="card-desc">Enter the scheduler key to see and control the backup queue.</p>
     <form id="login-form">
@@ -285,27 +341,45 @@ td .sub { display: block; font-size: 12px; color: var(--muted-foreground); }
   </div>
 </section>
 
-<div id="app" hidden>
-  <header class="topbar">
-    <div class="in">
-      <div class="brand"><svg aria-hidden="true"><use href="#i-logo"/></svg>zbsched</div>
-      <div class="crumb">Scheduler <span aria-hidden="true">›</span> <b>Backup queue</b></div>
-      <div class="tools">
-        <button id="theme" class="icon" type="button" title="Switch between light and dark theme" aria-label="Switch theme">
-          <svg class="sun" aria-hidden="true"><use href="#i-sun"/></svg>
-          <svg class="moon" aria-hidden="true"><use href="#i-moon"/></svg>
-        </button>
-        <button id="refresh" type="button" title="Reload the schedule list from zerobyte now">Refresh<span class="label-long">&nbsp;schedules</span></button>
-        <button id="logout" type="button">Logout</button>
-      </div>
+<div id="app" class="shell" hidden>
+  <aside class="sidebar" id="sidebar">
+    <div class="sb-head">
+      <a class="brand" href="#/" title="zbsched"><svg aria-hidden="true"><use href="#i-brand"/></svg><span class="sb-text">zbsched</span></a>
     </div>
-  </header>
+    <!-- filled from SECTIONS in the script -->
+    <nav class="sb-nav" id="nav" aria-label="Sections"></nav>
+    <div class="sb-foot">
+      <button id="theme" class="sb-action" type="button" title="Switch between light and dark theme" aria-label="Switch theme">
+        <svg class="sun" aria-hidden="true"><use href="#i-sun"/></svg>
+        <svg class="moon" aria-hidden="true"><use href="#i-moon"/></svg>
+      </button>
+      <button id="logout" class="sb-action" type="button" title="Log out" aria-label="Log out">
+        <svg aria-hidden="true"><use href="#i-logout"/></svg>
+      </button>
+    </div>
+  </aside>
+  <div class="backdrop" id="backdrop"></div>
 
-  <main class="grid">
-    <div class="wrap">
+  <div class="main">
+    <header class="topbar">
+      <div class="in">
+        <button id="sb-toggle" class="icon ghost" type="button" title="Toggle the sidebar (Ctrl+B)" aria-label="Toggle sidebar" aria-controls="sidebar">
+          <svg aria-hidden="true"><use href="#i-panel"/></svg>
+        </button>
+        <div class="crumb" id="crumb"></div>
+      </div>
+    </header>
+
+    <main class="grid">
+    <div class="wrap" data-section="scheduler">
       <section class="card">
-        <h1 class="card-title">Backup queue</h1>
-        <p class="card-desc">Schedules started by <span class="hi">zbsched</span> through the zerobyte API, at most <span id="limit">…</span> at a time.</p>
+        <div class="card-head">
+          <div>
+            <h1 class="card-title">Backup queue</h1>
+            <p class="card-desc">Schedules started by <span class="hi">zbsched</span> through the zerobyte API, at most <span id="limit">…</span> at a time.</p>
+          </div>
+          <button id="refresh" type="button" title="Reload the schedule list from zerobyte now">Refresh<span class="label-long">&nbsp;schedules</span></button>
+        </div>
         <div class="health" id="health"></div>
         <div class="rail">
           <div>
@@ -332,7 +406,8 @@ td .sub { display: block; font-size: 12px; color: var(--muted-foreground); }
         </table>
       </section>
     </div>
-  </main>
+    </main>
+  </div>
 </div>
 
 <div id="toast" role="status" aria-live="polite" hidden></div>
@@ -410,7 +485,7 @@ function toast(message, bad) {
 // ------------------------------------------------------------------- views
 
 function showLogin(message) {
-  stopPolling();
+  if (current) current.stop();
   $("app").hidden = true;
   $("login").hidden = false;
   $("login-msg").textContent = message || "";
@@ -567,8 +642,7 @@ async function poll() {
     const { status, data } = await api("/api/status");
     if (status === 401) return showLogin();
     if (status !== 200) throw new Error(data.error || `HTTP ${status}`);
-    $("login").hidden = true;
-    $("app").hidden = false;
+    showApp();
     render(data);
   } catch (e) {
     toast(`Cannot reach the scheduler: ${e.message}`, true);
@@ -610,6 +684,91 @@ $("refresh").addEventListener("click", async () => {
   }
 });
 
+// ------------------------------------------------------------------- sections
+
+// One entry per sidebar item. Each has a <div data-section="<id>"> in the page and its
+// own start/stop, so only the section on screen talks to the server. Its data call
+// answers 401 when the session is gone, which brings the sign-in form back.
+const SECTIONS = [
+  { id: "scheduler", label: "Scheduler", icon: "i-sched", crumb: "Backup queue", start: poll, stop: stopPolling },
+];
+let current = null;
+
+function showApp() {
+  $("login").hidden = true;
+  $("app").hidden = false;
+}
+
+function icon(id) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  const use = document.createElementNS(ns, "use");
+  svg.setAttribute("aria-hidden", "true");
+  use.setAttribute("href", `#${id}`);
+  svg.append(use);
+  return svg;
+}
+
+function buildNav() {
+  $("nav").replaceChildren(...SECTIONS.map((sec) => el("a", { class: "sb-item", href: `#/${sec.id}`, title: sec.label, "data-id": sec.id },
+    icon(sec.icon),
+    el("span", { class: "sb-text", text: sec.label }),
+  )));
+}
+
+// The URL hash picks the section (#/scheduler); anything else falls back to the first one.
+function route() {
+  const id = location.hash.replace(/^#\/?/, "");
+  const sec = SECTIONS.find((x) => x.id === id) || SECTIONS[0];
+  if (current && current !== sec) current.stop();
+  current = sec;
+  for (const node of document.querySelectorAll("[data-section]")) node.hidden = node.dataset.section !== sec.id;
+  for (const a of $("nav").children) {
+    if (a.dataset.id === sec.id) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  }
+  $("crumb").replaceChildren(sec.label, el("span", { "aria-hidden": "true", text: " › " }), el("b", { text: sec.crumb }));
+  closeDrawer();
+  sec.start();
+}
+
+// Desktop: collapse to an icon rail (remembered). Phone: open the sidebar as a drawer.
+const phone = window.matchMedia("(max-width: 760px)");
+
+function toggleSidebar() {
+  const root = document.documentElement;
+  if (phone.matches) {
+    root.classList.toggle("sb-open");
+  } else {
+    const collapsed = root.classList.toggle("sb-collapsed");
+    try { localStorage.setItem("zbsched-sidebar", collapsed ? "collapsed" : "open"); } catch (_) { /* storage blocked */ }
+  }
+  syncToggle();
+}
+
+function closeDrawer() {
+  document.documentElement.classList.remove("sb-open");
+  syncToggle();
+}
+
+function syncToggle() {
+  const root = document.documentElement;
+  const open = phone.matches ? root.classList.contains("sb-open") : !root.classList.contains("sb-collapsed");
+  $("sb-toggle").setAttribute("aria-expanded", String(open));
+}
+
+$("sb-toggle").addEventListener("click", toggleSidebar);
+$("backdrop").addEventListener("click", closeDrawer);
+phone.addEventListener("change", closeDrawer);
+window.addEventListener("hashchange", route);
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") closeDrawer();
+  else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "b" && !$("app").hidden) {
+    ev.preventDefault();
+    toggleSidebar();
+  }
+});
+
 $("theme").addEventListener("click", () => {
   const dark = document.documentElement.classList.toggle("dark");
   try { localStorage.setItem("zbsched-theme", dark ? "dark" : "light"); } catch (_) { /* storage blocked */ }
@@ -627,7 +786,7 @@ $("login-form").addEventListener("submit", async (ev) => {
   $("login-msg").textContent = "";
   try {
     const { status, data } = await api("/api/login", "POST", { key: $("key").value });
-    if (status === 200) { $("key").value = ""; poll(); }
+    if (status === 200) { $("key").value = ""; route(); }
     else $("login-msg").textContent = status === 401 ? "That key is not correct." : (data.error || `HTTP ${status}`);
   } catch (e) {
     $("login-msg").textContent = `Cannot reach the scheduler: ${e.message}`;
@@ -637,11 +796,13 @@ $("login-form").addEventListener("submit", async (ev) => {
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) stopPolling();
-  else if (!$("app").hidden) poll();
+  if (!current) return;
+  if (document.hidden) current.stop();
+  else if (!$("app").hidden) current.start();
 });
 
-poll();
+buildNav();
+route();
 </script>
 </body>
 </html>
