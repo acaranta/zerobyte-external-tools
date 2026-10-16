@@ -219,7 +219,7 @@ from Docker Hub and reads the zerobyte API key and the web interface key from th
 `.env`):
 
 ```sh
-printf 'ZEROBYTE_API_KEY=zb_xxx\nUI_API_KEY=%s\n' "$(openssl rand -hex 24)" > .env
+printf 'ZEROBYTE_API_KEY=zb_xxx\nUI_API_KEY=%s\n' "$(openssl rand -hex 32)" > .env
 chmod 600 .env
 docker compose -f compose.example.yml up -d
 ```

@@ -24,7 +24,7 @@ services:
       STATE_FILE: /state/state.json
       # Web interface on :8080 (and /healthz, which needs no key). Without
       # UI_API_KEY (16+ characters) only /healthz is served. Generate one with:
-      #   openssl rand -hex 24
+      #   openssl rand -hex 32
       UI_API_KEY: ${UI_API_KEY:?set UI_API_KEY}
       HEALTH_BIND: 0.0.0.0
     volumes:
