@@ -9,11 +9,11 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from fakes import Clock, FakeZerobyte
-from zbsched.client import ZerobyteError
-from zbsched.config import load_settings
-from zbsched.logs import LogfmtFormatter
-from zbsched.scheduler import Job, Scheduler
-from zbsched.state import StateStore
+from zbtools.client import ZerobyteError
+from zbtools.config import load_settings
+from zbtools.logs import LogfmtFormatter
+from zbtools.scheduler import Job, Scheduler
+from zbtools.state import StateStore
 
 
 def logfmt(caplog) -> str:
@@ -141,7 +141,7 @@ async def test_abandoned_task_not_timed_out_again(world, caplog):
     assert w.saved()["abandoned"] == [stuck]
 
     caplog.clear()
-    with caplog.at_level(logging.INFO, logger="zbsched"):
+    with caplog.at_level(logging.INFO, logger="zbtools"):
         s2 = await w.start()
         await w.tick(s2, 20)
     assert "a" not in s2.running
@@ -159,7 +159,7 @@ async def test_finished_while_down_is_reported_with_real_end(world, caplog):
     w.fake.finish(t, "failed", "boom")  # ends while the scheduler is down
     w.clock.advance(100)
 
-    with caplog.at_level(logging.INFO, logger="zbsched"):
+    with caplog.at_level(logging.INFO, logger="zbtools"):
         s2 = await w.start()
     assert "recovered=true" in logfmt(caplog)
     assert "status=failed" in logfmt(caplog)
@@ -239,7 +239,7 @@ async def test_history_paging_stops_at_age_limit(world):
 async def test_history_error_only_warns(world, caplog):
     w = world([sched("a")], COOLDOWN_SECONDS=60)
     w.fake.history_error = ZerobyteError("HTTP 500", 500)
-    with caplog.at_level(logging.WARNING, logger="zbsched"):
+    with caplog.at_level(logging.WARNING, logger="zbtools"):
         s = await w.start(stateful=False)
     assert "action=task_history" in logfmt(caplog)
     assert s.table
@@ -253,7 +253,7 @@ async def test_restored_queue_drops_removed_and_running(world, caplog):
     s.queue.appendleft(Job("a", "catchup"))  # stale entry for a schedule now running
     s.save_state()
 
-    with caplog.at_level(logging.INFO, logger="zbsched"):
+    with caplog.at_level(logging.INFO, logger="zbtools"):
         s2 = await w.start()
     assert [j.short_id for j in s2.queue] == ["b"]
     assert "reason=schedule_removed" in logfmt(caplog)

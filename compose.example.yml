@@ -1,8 +1,9 @@
 # Example deployment next to zerobyte (adapt names, paths and network).
-# The image is built by CI and pushed to the in-house registry.
+# The image is published on Docker Hub; to build it yourself instead, replace
+# `image:` with `build: .` in a clone of this repository.
 services:
-  zerobyte-scheduler:
-    image: registry.example.com/infra/zerobyte-external-scheduler:latest
+  zerobyte-external-tools:
+    image: acaranta/zerobyte-external-tools:latest
     restart: unless-stopped
     environment:
       ZEROBYTE_URL: http://zerobyte:4096
@@ -21,34 +22,31 @@ services:
       # Queue, running backups and cool-downs survive restarts and upgrades.
       STATE_FILE: /state/state.json
       # Web interface on :8080 (and /healthz, which needs no key). Without
-      # SCHEDULER_API_KEY (16+ characters) only /healthz is served.
-      SCHEDULER_API_KEY: ${SCHEDULER_API_KEY:?set SCHEDULER_API_KEY}
+      # UI_API_KEY (16+ characters) only /healthz is served.
+      UI_API_KEY: ${UI_API_KEY:?set UI_API_KEY}
       HEALTH_BIND: 0.0.0.0
     volumes:
       # Optional with SCHEDULE_SOURCE=zerobyte (overrides / exclusions only).
       - ./schedules.yml:/config/schedules.yml:ro
       # Writable even with read_only: true; owned by uid 10001 in the image.
-      - scheduler-state:/state
-    # Reach the interface through the reverse proxy on this network (preferably over
+      - zbtools-state:/state
+    # Reach the interface through a reverse proxy on this network (preferably over
     # https, so the session cookie is Secure), or publish the port on a private address:
     # ports:
     #   - "127.0.0.1:8080:8080"
     networks:
-      - infratools
+      - zerobyte
     read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     mem_limit: 128m
-    logging:
-      driver: syslog
-      options:
-        tag: "{{.Name}}"
 
 volumes:
-  scheduler-state:
+  zbtools-state:
 
 networks:
-  infratools:
+  # The network zerobyte is attached to, so that http://zerobyte:4096 resolves.
+  zerobyte:
     external: true

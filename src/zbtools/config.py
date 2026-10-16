@@ -115,9 +115,9 @@ def _api_key(env: Mapping[str, str]) -> str:
 
 
 def _ui_key(env: Mapping[str, str]) -> str | None:
-    key = _secret(env, "SCHEDULER_API_KEY")
+    key = _secret(env, "UI_API_KEY")
     if key is not None and len(key) < UI_KEY_MIN_LENGTH:
-        raise ConfigError(f"SCHEDULER_API_KEY must be at least {UI_KEY_MIN_LENGTH} characters")
+        raise ConfigError(f"UI_API_KEY must be at least {UI_KEY_MIN_LENGTH} characters")
     return key
 
 

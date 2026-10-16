@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 
-from zbsched.client import AlreadyRunning, AuthError, NotFound, ZerobyteClient, ZerobyteError
+from zbtools.client import AlreadyRunning, AuthError, NotFound, ZerobyteClient, ZerobyteError
 
 BASE = "http://zerobyte.test"
 

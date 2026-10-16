@@ -1,9 +1,9 @@
 """Command-line entry point.
 
-python -m zbsched                 run the scheduler (default)
-python -m zbsched --once all      run every backup we own (paused in zerobyte) one by one, then exit
-python -m zbsched --once a,b      same for the given shortIds (or names)
-python -m zbsched --check         validate config + connectivity and print the table
+python -m zbtools                 run the scheduler (default)
+python -m zbtools --once all      run every backup we own (paused in zerobyte) one by one, then exit
+python -m zbtools --once a,b      same for the given shortIds (or names)
+python -m zbtools --check         validate config + connectivity and print the table
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ EXIT_OK, EXIT_FAILED, EXIT_CONFIG = 0, 1, 2
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="zbsched",
+        prog="zbtools",
         description="Run zerobyte backups on a cron schedule with a concurrency limit.",
     )
     mode = parser.add_mutually_exclusive_group()
@@ -88,7 +88,7 @@ def print_table(scheduler: Scheduler) -> None:
                 entry.cron,
                 entry.source,
                 nxt.strftime("%Y-%m-%d %H:%M %Z") if nxt else "-",
-                "zerobyte" if entry.enabled_in_zerobyte else "zbsched",
+                "zerobyte" if entry.enabled_in_zerobyte else "zbtools",
             )
         )
     widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]

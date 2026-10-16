@@ -1,10 +1,10 @@
 import logging
 
-from zbsched.logs import LogfmtFormatter
+from zbtools.logs import LogfmtFormatter
 
 
 def record(msg="", event=None, **fields):
-    rec = logging.LogRecord("zbsched", logging.WARNING, __file__, 1, msg, None, None)
+    rec = logging.LogRecord("zbtools", logging.WARNING, __file__, 1, msg, None, None)
     rec.event = event
     rec.fields = fields
     return rec

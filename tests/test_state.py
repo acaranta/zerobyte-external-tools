@@ -3,8 +3,8 @@ import logging
 
 import pytest
 
-from zbsched.logs import LogfmtFormatter
-from zbsched.state import STATE_VERSION, SavedState, StateFileError, StateStore, parse_state
+from zbtools.logs import LogfmtFormatter
+from zbtools.state import STATE_VERSION, SavedState, StateFileError, StateStore, parse_state
 
 
 def logfmt(caplog) -> str:
@@ -48,7 +48,7 @@ def test_missing_file_is_empty(tmp_path):
 def test_unusable_file_is_moved_aside(tmp_path, caplog, content):
     path = tmp_path / "state.json"
     path.write_text(content)
-    with caplog.at_level(logging.ERROR, logger="zbsched"):
+    with caplog.at_level(logging.ERROR, logger="zbtools"):
         assert StateStore(path).load() == SavedState()
     assert not path.exists()
     assert (tmp_path / "state.json.corrupt").read_text() == content
@@ -81,7 +81,7 @@ def test_save_only_when_changed(tmp_path, monkeypatch):
     writes = []
     real_replace = __import__("os").replace
     monkeypatch.setattr(
-        "zbsched.state.os.replace", lambda a, b: (writes.append(b), real_replace(a, b))
+        "zbtools.state.os.replace", lambda a, b: (writes.append(b), real_replace(a, b))
     )
     store.save(full_state(), now=1.0)
     store.save(full_state(), now=2.0)  # same content, later time: no write
@@ -94,7 +94,7 @@ def test_save_only_when_changed(tmp_path, monkeypatch):
 
 def test_save_error_is_logged_once_and_recovers(tmp_path, caplog):
     store = StateStore(tmp_path / "missing-dir" / "state.json")
-    with caplog.at_level(logging.INFO, logger="zbsched"):
+    with caplog.at_level(logging.INFO, logger="zbtools"):
         assert not store.save(full_state(), now=1.0)
         assert not store.save(full_state(), now=2.0)
         assert logfmt(caplog).count("state_error") == 1

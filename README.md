@@ -1,8 +1,13 @@
-# zerobyte-external-scheduler
+# zerobyte-external-tools
 
-A small container that takes over backup scheduling from
-[zerobyte](https://github.com/nicotsx/zerobyte) so that only a bounded number of
-backups run at the same time.
+Companion tools for [zerobyte](https://github.com/nicotsx/zerobyte), the restic backup
+UI, in one small container (`zbtools`):
+
+- a **backup scheduler** that takes over scheduling from zerobyte so that only a
+  bounded number of backups run at the same time;
+- a **web interface** showing the backup queue, and a [Backups](#backups-pane) pane to
+  manage zerobyte's schedules in bulk: who runs them (zerobyte or this service),
+  retention policy and notification destinations.
 
 zerobyte (checked against v0.43.1) starts every due schedule at once, with no
 concurrency limit. With many schedules writing to one repository, this means many
@@ -73,8 +78,8 @@ All configuration is through environment variables.
 | `RETRY_DELAY_SECONDS` | `600` | delay before a retry |
 | `HEALTH_PORT` | `8080` | port for the web interface and `GET /healthz`; `0` disables both |
 | `HEALTH_BIND` | `127.0.0.1` | address they listen on (set `0.0.0.0` to reach them from outside the container) |
-| `SCHEDULER_API_KEY` | *unset* | key for the [web interface](#web-interface), at least 16 characters. Unset: the interface is disabled, only `/healthz` is served |
-| `SCHEDULER_API_KEY_FILE` | | alternative: file holding that key (e.g. a mounted Docker secret) |
+| `UI_API_KEY` | *unset* | key for the [web interface](#web-interface), at least 16 characters. Unset: the interface is disabled, only `/healthz` is served |
+| `UI_API_KEY_FILE` | | alternative: file holding that key (e.g. a mounted Docker secret) |
 | `TZ` | `Europe/Paris` | time zone for cron expressions; **must match zerobyte's** |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
@@ -147,12 +152,12 @@ stays stored, so `SCHEDULE_SOURCE=zerobyte` keeps using it.
 Then check that everything is in order without starting anything:
 
 ```sh
-docker compose run --rm zerobyte-scheduler --check
+docker compose run --rm zerobyte-external-tools --check
 ```
 
 ```
 SHORT_ID  NAME    CRON        SOURCE    NEXT_RUN               RUN_BY
-abc123    Photos  0 3 * * *   zerobyte  2026-10-08 03:00 CEST  zbsched
+abc123    Photos  0 3 * * *   zerobyte  2026-10-08 03:00 CEST  zbtools
 def456    Docs    30 1 * * *  zerobyte  -                      zerobyte
 ```
 
@@ -169,12 +174,13 @@ warning (`event=schedule_file_conflict`).
 
 ### Docker Compose
 
-See [compose.example.yml](compose.example.yml). It pulls the image built by CI and
-reads the zerobyte API key and the web interface key from the environment (shell or
+See [compose.example.yml](compose.example.yml). It pulls
+[`acaranta/zerobyte-external-tools`](https://hub.docker.com/r/acaranta/zerobyte-external-tools)
+from Docker Hub and reads the zerobyte API key and the web interface key from the environment (shell or
 `.env`):
 
 ```sh
-printf 'ZEROBYTE_API_KEY=zb_xxx\nSCHEDULER_API_KEY=%s\n' "$(openssl rand -hex 24)" > .env
+printf 'ZEROBYTE_API_KEY=zb_xxx\nUI_API_KEY=%s\n' "$(openssl rand -hex 24)" > .env
 chmod 600 .env
 cp config/schedules.example.yml schedules.yml   # optional with SCHEDULE_SOURCE=zerobyte
 docker compose -f compose.example.yml up -d
@@ -182,7 +188,7 @@ docker compose -f compose.example.yml up -d
 
 ### Image build
 
-To build the image locally: `docker build -t zerobyte-external-scheduler .`
+To build the image locally: `docker build -t zerobyte-external-tools .`
 
 The image runs as a non-root user (uid 10001), works with a read-only root filesystem,
 and has a `HEALTHCHECK` on `/healthz`.
@@ -190,10 +196,10 @@ and has a `HEALTHCHECK` on `/healthz`.
 ### Command line
 
 ```sh
-python -m zbsched                 # run the scheduler (default)
-python -m zbsched --check         # check config + API access, print the table, start nothing
-python -m zbsched --once all      # run every scheduled backup one after another, then exit
-python -m zbsched --once abc123,Photos
+python -m zbtools                 # run the scheduler (default)
+python -m zbtools --check         # check config + API access, print the table, start nothing
+python -m zbtools --once all      # run every scheduled backup one after another, then exit
+python -m zbtools --once abc123,Photos
 ```
 
 `--once` respects `MAX_CONCURRENT` and the cool-down, and exits with `1` if any backup
@@ -209,7 +215,7 @@ schedule or task ids. It needs no key, even when the web interface is enabled.
 
 ## Web interface
 
-With `SCHEDULER_API_KEY` set, `http://<host>:8080/` shows the schedules and the queue
+With `UI_API_KEY` set, `http://<host>:8080/` shows the schedules and the queue
 and lets you act on them. Sign in with the key; the browser then keeps a session cookie
 for 7 days.
 
@@ -224,7 +230,7 @@ The page uses zerobyte's look (colours, cards, buttons and its *Google Sans Code
 dark by default, with the same sidebar: **Scheduler** (`#/scheduler`, the queue) and
 **Backups** (`#/backups`, zerobyte's schedules). The panel button in the top bar (or Ctrl+B) collapses the sidebar to
 icons; on a phone it opens it as a drawer. The sidebar footer holds the light/dark
-switch and *Log out*. The browser remembers the theme and the sidebar state. The font is bundled (`src/zbsched/static/google-sans-code.woff2`,
+switch and *Log out*. The browser remembers the theme and the sidebar state. The font is bundled (`src/zbtools/static/google-sans-code.woff2`,
 SIL Open Font License 1.1, see `google-sans-code-OFL.txt` next to it) and served at
 `/static/google-sans-code.woff2`, so the page loads nothing from outside.
 
@@ -242,13 +248,13 @@ Every action logs `event=ui_action action=<run_next|run_now|cancel|refresh>
 schedule=… result=… client=<ip>`.
 
 The same JSON API works with curl, using the key as a header. POST requests also
-need `X-Zbsched: 1`:
+need `X-Zbtools: 1`:
 
 ```sh
-curl -H "x-api-key: $SCHEDULER_API_KEY" http://localhost:8080/api/status
-curl -X POST -H "x-api-key: $SCHEDULER_API_KEY" -H 'X-Zbsched: 1' \
+curl -H "x-api-key: $UI_API_KEY" http://localhost:8080/api/status
+curl -X POST -H "x-api-key: $UI_API_KEY" -H 'X-Zbtools: 1' \
      http://localhost:8080/api/schedules/abc123/run-next      # also run-now, cancel
-curl -X POST -H "x-api-key: $SCHEDULER_API_KEY" -H 'X-Zbsched: 1' http://localhost:8080/api/refresh
+curl -X POST -H "x-api-key: $UI_API_KEY" -H 'X-Zbtools: 1' http://localhost:8080/api/refresh
 ```
 
 ### Backups pane
@@ -306,7 +312,7 @@ schedules, so:
 - reach it through a reverse proxy over https, or on a private network. Behind https
   (`X-Forwarded-Proto: https`) the cookie is marked `Secure`;
 - the cookie is `HttpOnly` and `SameSite=Strict`, holds a signature rather than the key,
-  and is invalidated when the key changes. Each POST also needs the `X-Zbsched` header,
+  and is invalidated when the key changes. Each POST also needs the `X-Zbtools` header,
   which blocks cross-site requests;
 - a wrong key is answered after 1 second and logged as `event=ui_login_failed`.
 
@@ -354,9 +360,14 @@ by the CLI tests, which can also be run by hand for a local end-to-end check:
 ```sh
 uv run python tests/fake_server.py --port 48096 --task-seconds 15 &
 ZEROBYTE_URL=http://127.0.0.1:48096 ZEROBYTE_API_KEY=test-key SCHEDULES_FILE=/nonexistent \
-  SCHEDULER_API_KEY=local-test-key-1234 POLL_INTERVAL_SECONDS=5 COOLDOWN_SECONDS=3 \
-  uv run python -m zbsched
+  UI_API_KEY=local-test-key-1234 POLL_INTERVAL_SECONDS=5 COOLDOWN_SECONDS=3 \
+  uv run python -m zbtools
 ```
 
 Then open http://127.0.0.1:8080/ and sign in with `local-test-key-1234`. The fake also
 answers task cancellation.
+
+## License
+
+[MIT](LICENSE). The bundled *Google Sans Code* font is under the SIL Open Font License
+1.1 ([src/zbtools/static/google-sans-code-OFL.txt](src/zbtools/static/google-sans-code-OFL.txt)).

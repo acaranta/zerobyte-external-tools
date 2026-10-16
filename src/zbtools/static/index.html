@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<title>zbsched</title>
+<title>zbtools</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='3' width='6' height='10' rx='1' fill='%23ff543a'/%3E%3Crect x='9' y='3' width='6' height='10' rx='1' fill='none' stroke='%23a1a1a1' stroke-width='1.5'/%3E%3C/svg%3E">
 <link rel="preload" href="/static/google-sans-code.woff2" as="font" type="font/woff2" crossorigin>
 <script>
   // Apply the saved theme and sidebar state before the first paint (dark and open by default, like zerobyte).
   try {
-    if (localStorage.getItem("zbsched-theme") === "light") document.documentElement.classList.remove("dark");
-    if (localStorage.getItem("zbsched-sidebar") === "collapsed") document.documentElement.classList.add("sb-collapsed");
+    if (localStorage.getItem("zbtools-theme") === "light") document.documentElement.classList.remove("dark");
+    if (localStorage.getItem("zbtools-sidebar") === "collapsed") document.documentElement.classList.add("sb-collapsed");
   } catch (_) { /* storage blocked */ }
 </script>
 <style>
@@ -420,11 +420,11 @@ dialog.card::backdrop { background: rgba(0, 0, 0, .6); }
 
 <section class="login-page grid" id="login" hidden>
   <div class="login card">
-    <div class="brand"><svg aria-hidden="true"><use href="#i-brand"/></svg>zbsched</div>
+    <div class="brand"><svg aria-hidden="true"><use href="#i-brand"/></svg>zbtools</div>
     <h1 class="card-title">Sign in</h1>
-    <p class="card-desc">Enter the scheduler key to see and control the backup queue.</p>
+    <p class="card-desc">Enter the API key to manage your zerobyte backups.</p>
     <form id="login-form">
-      <label for="key">Scheduler key</label>
+      <label for="key">API key</label>
       <input id="key" name="key" type="password" autocomplete="current-password" required>
       <button class="primary" type="submit">Sign in</button>
       <div class="msg" id="login-msg" role="alert"></div>
@@ -435,7 +435,7 @@ dialog.card::backdrop { background: rgba(0, 0, 0, .6); }
 <div id="app" class="shell" hidden>
   <aside class="sidebar" id="sidebar">
     <div class="sb-head">
-      <a class="brand" href="#/" title="zbsched"><svg aria-hidden="true"><use href="#i-brand"/></svg><span class="sb-text">zbsched</span></a>
+      <a class="brand" href="#/" title="zbtools"><svg aria-hidden="true"><use href="#i-brand"/></svg><span class="sb-text">zbtools</span></a>
     </div>
     <!-- filled from SECTIONS in the script -->
     <nav class="sb-nav" id="nav" aria-label="Sections"></nav>
@@ -467,7 +467,7 @@ dialog.card::backdrop { background: rgba(0, 0, 0, .6); }
         <div class="card-head">
           <div>
             <h1 class="card-title">Backup queue</h1>
-            <p class="card-desc">Schedules started by <span class="hi">zbsched</span> through the zerobyte API, at most <span id="limit">…</span> at a time.</p>
+            <p class="card-desc">Schedules started by <span class="hi">zbtools</span> through the zerobyte API, at most <span id="limit">…</span> at a time.</p>
           </div>
           <button id="refresh" type="button" title="Reload the schedule list from zerobyte now">Refresh<span class="label-long">&nbsp;schedules</span></button>
         </div>
@@ -503,7 +503,7 @@ dialog.card::backdrop { background: rgba(0, 0, 0, .6); }
         <div class="head card-head">
           <div>
             <h1 class="card-title">Backups</h1>
-            <p class="card-desc">Backup schedules configured in zerobyte. <b>Active</b> ones are run by zerobyte itself, <b>paused</b> ones by <span class="hi">zbsched</span>.</p>
+            <p class="card-desc">Backup schedules configured in zerobyte. <b>Active</b> ones are run by zerobyte itself, <b>paused</b> ones by <span class="hi">zbtools</span>.</p>
           </div>
           <button id="bk-reload" type="button" title="Reload the list from zerobyte">Reload</button>
         </div>
@@ -511,7 +511,7 @@ dialog.card::backdrop { background: rgba(0, 0, 0, .6); }
           <button id="bk-all" type="button">Select all</button>
           <span class="count" id="bk-count" aria-live="polite">0 selected</span>
           <button id="bk-activate" type="button" title="Let zerobyte schedule the selected backups">Activate</button>
-          <button id="bk-pause" type="button" title="Pause zerobyte scheduling: zbsched runs them">Pause</button>
+          <button id="bk-pause" type="button" title="Pause zerobyte scheduling: zbtools runs them">Pause</button>
           <button id="bk-retention" type="button">Edit retention</button>
           <button id="bk-notify" type="button">Edit notifications</button>
         </div>
@@ -590,7 +590,7 @@ function el(tag, props = {}, ...children) {
 }
 
 async function api(path, method = "GET", body) {
-  const headers = { "X-Zbsched": "1" };
+  const headers = { "X-Zbtools": "1" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const r = await fetch(path, {
     method, headers, credentials: "same-origin",
@@ -714,7 +714,7 @@ function stateCell(r) {
     idle: "Idle",
   };
   if (r.state === "idle" && r.run_by === "zerobyte") {
-    return el("span", { class: "state zerobyte", title: "Active in zerobyte: zerobyte runs it on its cron, zbsched leaves it alone", text: "Run by zerobyte" });
+    return el("span", { class: "state zerobyte", title: "Active in zerobyte: zerobyte runs it on its cron, zbtools leaves it alone", text: "Run by zerobyte" });
   }
   return el("span", { class: `state ${r.state}`, text: labels[r.state] || r.state });
 }
@@ -802,7 +802,7 @@ async function poll() {
     showApp();
     render(data);
   } catch (e) {
-    toast(`Cannot reach the scheduler: ${e.message}`, true);
+    toast(`Cannot reach zbtools: ${e.message}`, true);
   }
   if (!document.hidden) timer = setTimeout(poll, POLL_MS);
 }
@@ -914,10 +914,10 @@ function onOff(b) {
       type: "button", class: `onoff${b.enabled ? " on" : ""}`, role: "switch", "aria-checked": String(b.enabled),
       // Pausing is always possible; zerobyte refuses to activate a schedule without cron.
       disabled: bkBusy || (manual && !b.enabled),
-      title: manual && !b.enabled ? "Manual only: no cron to schedule" : (b.enabled ? "Pause zerobyte scheduling: zbsched will run it" : "Let zerobyte schedule it: zbsched will leave it alone"),
+      title: manual && !b.enabled ? "Manual only: no cron to schedule" : (b.enabled ? "Pause zerobyte scheduling: zbtools will run it" : "Let zerobyte schedule it: zbtools will leave it alone"),
       onclick: () => setScheduling([b.short_id], !b.enabled),
     }, el("span", { text: b.enabled ? "Active" : "Paused" }), el("span", { class: "knob", "aria-hidden": "true" })),
-    el("span", { class: "sub", text: { zerobyte: "run by zerobyte", zbsched: "run by zbsched", none: "not scheduled" }[b.run_by] }),
+    el("span", { class: "sub", text: { zerobyte: "run by zerobyte", zbtools: "run by zbtools", none: "not scheduled" }[b.run_by] }),
   );
 }
 
@@ -978,7 +978,7 @@ async function setScheduling(ids, enabled) {
   const name = names(ids);
   const failed = results.filter((r) => !r.ok);
   const done = results.length - failed.length;
-  const verb = enabled ? "now run by zerobyte" : "paused in zerobyte, now run by zbsched";
+  const verb = enabled ? "now run by zerobyte" : "paused in zerobyte, now run by zbtools";
   if (!failed.length) toast(ids.length === 1 ? `${name(ids[0])}: ${verb}.` : `${plural(done, "backup")} ${verb}.`);
   else toast(`${done} of ${results.length} changed. Failed: ${failed.map((r) => `${name(r.id)} (${r.error})`).join("; ")}`, true);
 }
@@ -986,8 +986,8 @@ async function setScheduling(ids, enabled) {
 function bulkScheduling(enabled) {
   const ids = [...selected];
   const what = enabled
-    ? `Activate zerobyte scheduling for ${plural(ids.length, "backup")}?\n\nzbsched will stop running them.`
-    : `Pause zerobyte scheduling for ${plural(ids.length, "backup")}?\n\nzbsched will run them on their cron.`;
+    ? `Activate zerobyte scheduling for ${plural(ids.length, "backup")}?\n\nzbtools will stop running them.`
+    : `Pause zerobyte scheduling for ${plural(ids.length, "backup")}?\n\nzbtools will run them on their cron.`;
   if (confirm(what)) setScheduling(ids, enabled);
 }
 
@@ -1380,7 +1380,7 @@ function toggleSidebar() {
     root.classList.toggle("sb-open");
   } else {
     const collapsed = root.classList.toggle("sb-collapsed");
-    try { localStorage.setItem("zbsched-sidebar", collapsed ? "collapsed" : "open"); } catch (_) { /* storage blocked */ }
+    try { localStorage.setItem("zbtools-sidebar", collapsed ? "collapsed" : "open"); } catch (_) { /* storage blocked */ }
   }
   syncToggle();
 }
@@ -1410,7 +1410,7 @@ document.addEventListener("keydown", (ev) => {
 
 $("theme").addEventListener("click", () => {
   const dark = document.documentElement.classList.toggle("dark");
-  try { localStorage.setItem("zbsched-theme", dark ? "dark" : "light"); } catch (_) { /* storage blocked */ }
+  try { localStorage.setItem("zbtools-theme", dark ? "dark" : "light"); } catch (_) { /* storage blocked */ }
 });
 
 $("logout").addEventListener("click", async () => {
@@ -1428,7 +1428,7 @@ $("login-form").addEventListener("submit", async (ev) => {
     if (status === 200) { $("key").value = ""; route(); }
     else $("login-msg").textContent = status === 401 ? "That key is not correct." : (data.error || `HTTP ${status}`);
   } catch (e) {
-    $("login-msg").textContent = `Cannot reach the scheduler: ${e.message}`;
+    $("login-msg").textContent = `Cannot reach zbtools: ${e.message}`;
   } finally {
     button.disabled = false;
   }

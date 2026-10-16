@@ -30,8 +30,8 @@ ENV PATH=/app/.venv/bin:$PATH \
 
 COPY --from=build /app/.venv /app/.venv
 
-RUN groupadd --system --gid 10001 zbsched \
-    && useradd --system --uid 10001 --gid zbsched --no-create-home --shell /usr/sbin/nologin zbsched \
+RUN groupadd --system --gid 10001 zbtools \
+    && useradd --system --uid 10001 --gid zbtools --no-create-home --shell /usr/sbin/nologin zbtools \
     && install -d -o 10001 -g 10001 -m 0750 /state
 
 # Optional STATE_FILE location: a named volume mounted here inherits this ownership.
@@ -43,4 +43,4 @@ WORKDIR /app
 HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 \
     CMD ["python", "-c", "import os,sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:%s/healthz' % os.environ.get('HEALTH_PORT', '8080'), timeout=4).status == 200 else 1)"]
 
-ENTRYPOINT ["python", "-m", "zbsched"]
+ENTRYPOINT ["python", "-m", "zbtools"]

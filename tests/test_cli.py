@@ -4,7 +4,7 @@ import threading
 import pytest
 
 from fake_server import API_KEY, schedule, serve
-from zbsched.__main__ import EXIT_CONFIG, EXIT_OK, main
+from zbtools.__main__ import EXIT_CONFIG, EXIT_OK, main
 
 
 @pytest.fixture

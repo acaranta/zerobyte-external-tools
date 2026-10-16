@@ -7,13 +7,13 @@ import httpx
 import pytest
 
 from fakes import Clock, FakeZerobyte
-from zbsched.client import ZerobyteError
-from zbsched.config import load_settings
-from zbsched.scheduler import Scheduler
-from zbsched.web import COOKIE, SESSION_MAX_AGE, make_session, session_valid, start_web_server
+from zbtools.client import ZerobyteError
+from zbtools.config import load_settings
+from zbtools.scheduler import Scheduler
+from zbtools.web import COOKIE, SESSION_MAX_AGE, make_session, session_valid, start_web_server
 
 KEY = "ui-key-0123456789"
-HDR = {"X-Zbsched": "1"}
+HDR = {"X-Zbtools": "1"}
 T0 = datetime(2026, 1, 10, 2, 59, 30, tzinfo=ZoneInfo("Europe/Paris")).timestamp()
 
 
@@ -30,7 +30,7 @@ def sched(sid, cron="0 3 * * *"):
 
 @pytest.fixture
 async def serve(tmp_path, monkeypatch):
-    monkeypatch.setattr("zbsched.web.LOGIN_FAILURE_DELAY", 0)
+    monkeypatch.setattr("zbtools.web.LOGIN_FAILURE_DELAY", 0)
     runners = []
     clients = []
 
@@ -43,7 +43,7 @@ async def serve(tmp_path, monkeypatch):
                 "ZEROBYTE_API_KEY": "k",
                 "SCHEDULES_FILE": str(tmp_path / "none.yml"),
                 "COOLDOWN_SECONDS": "0",
-                **({"SCHEDULER_API_KEY": ui_key} if ui_key else {}),
+                **({"UI_API_KEY": ui_key} if ui_key else {}),
                 **{k: str(v) for k, v in env.items()},
             }
         )
@@ -79,7 +79,7 @@ async def test_ui_disabled_without_key(serve):
     for path in ("/", "/api/status"):
         r = await http.get(path, headers={"x-api-key": KEY})
         assert r.status_code == 404
-        assert "SCHEDULER_API_KEY" in r.json()["error"]
+        assert "UI_API_KEY" in r.json()["error"]
     assert (await http.post("/api/login", json={"key": KEY})).status_code == 404
 
 
@@ -89,7 +89,7 @@ async def test_page_is_served_without_auth_and_holds_no_data(serve):
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/html")
     assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
-    assert "<title>zbsched</title>" in r.text
+    assert "<title>zbtools</title>" in r.text
     assert "A" not in r.text.split("<body>")[1].split("<script>")[0].split()  # no schedule name
     assert "font-src 'self'" in r.headers["content-security-policy"]
 
@@ -250,7 +250,7 @@ async def test_status_makes_no_zerobyte_call(serve):
 
 
 async def test_failed_login_is_slowed_down(serve, monkeypatch):
-    monkeypatch.setattr("zbsched.web.LOGIN_FAILURE_DELAY", 0.2)
+    monkeypatch.setattr("zbtools.web.LOGIN_FAILURE_DELAY", 0.2)
     _, _, _, http = await serve([sched("a")])
     loop = asyncio.get_running_loop()
     start = loop.time()
@@ -259,7 +259,7 @@ async def test_failed_login_is_slowed_down(serve, monkeypatch):
 
 
 def test_page_ships_with_the_package():
-    from zbsched.web import load_page
+    from zbtools.web import load_page
 
     assert b"Backup queue" in load_page()
 
@@ -293,7 +293,7 @@ async def test_backups_list(serve):
     rows = {row["short_id"]: row for row in r.json()["backups"]}
     assert rows["a"]["retention"] == {"keepDaily": 7}  # 0 = no rule, duration not shown
     assert (rows["a"]["volume"], rows["a"]["repository"]) == ("vol-a", "s3-main")
-    assert [rows[x]["run_by"] for x in "abm"] == ["zbsched", "zerobyte", "none"]
+    assert [rows[x]["run_by"] for x in "abm"] == ["zbtools", "zerobyte", "none"]
     assert rows["b"]["retention"] == {}
     assert rows["a"]["last_backup_at"] == pytest.approx(T0 - 3600)
 
@@ -392,7 +392,7 @@ async def test_status_rows_show_who_runs_them(serve):
     _, _, _, http = await serve([zb("a"), zb("b", enabled=True)])
     rows = (await http.get("/api/status", headers=AUTH)).json()["schedules"]
     assert {r["short_id"]: (r["run_by"], r["next_run"]) for r in rows}["b"] == ("zerobyte", None)
-    assert next(r for r in rows if r["short_id"] == "a")["run_by"] == "zbsched"
+    assert next(r for r in rows if r["short_id"] == "a")["run_by"] == "zbtools"
 
 
 # ------------------------------------------------------------ backups notifications

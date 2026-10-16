@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from zbsched.config import ConfigError, load_settings
+from zbtools.config import ConfigError, load_settings
 
 BASE = {"ZEROBYTE_URL": "http://zerobyte:4096/", "ZEROBYTE_API_KEY": "secret"}
 
@@ -79,8 +79,8 @@ def test_api_key_file(tmp_path):
         ({**BASE, "TZ": "Mars/Olympus"}, "time zone"),
         ({**BASE, "CATCH_UP": "maybe"}, "boolean"),
         ({**BASE, "LOG_LEVEL": "loud"}, "LOG_LEVEL"),
-        ({**BASE, "SCHEDULER_API_KEY": "short"}, "at least 16"),
-        ({**BASE, "SCHEDULER_API_KEY": "x" * 16, "SCHEDULER_API_KEY_FILE": "/x"}, "only one"),
+        ({**BASE, "UI_API_KEY": "short"}, "at least 16"),
+        ({**BASE, "UI_API_KEY": "x" * 16, "UI_API_KEY_FILE": "/x"}, "only one"),
     ],
 )
 def test_invalid(env, message):
@@ -96,9 +96,7 @@ def test_empty_key_file(tmp_path):
 
 
 def test_ui_key(tmp_path):
-    assert load_settings({**BASE, "SCHEDULER_API_KEY": "u" * 16}).ui_key == "u" * 16
+    assert load_settings({**BASE, "UI_API_KEY": "u" * 16}).ui_key == "u" * 16
     key = tmp_path / "ui"
     key.write_text("ui-key-from-a-file\n")
-    assert load_settings({**BASE, "SCHEDULER_API_KEY_FILE": str(key)}).ui_key == (
-        "ui-key-from-a-file"
-    )
+    assert load_settings({**BASE, "UI_API_KEY_FILE": str(key)}).ui_key == "ui-key-from-a-file"

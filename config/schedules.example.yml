@@ -1,4 +1,4 @@
-# Schedules file for zerobyte-external-scheduler.
+# Schedules file for zerobyte-external-tools.
 #
 # SCHEDULE_SOURCE=zerobyte (default): every zerobyte schedule is run on its own
 #   cronExpression; this file is optional and only overrides or excludes entries.

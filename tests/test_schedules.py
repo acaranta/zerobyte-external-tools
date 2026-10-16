@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from zbsched.schedules import (
+from zbtools.schedules import (
     ScheduleEntry,
     ScheduleError,
     build_table,

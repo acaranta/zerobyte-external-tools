@@ -1,13 +1,13 @@
 """HTTP server: the web UI, its JSON API and the unauthenticated GET /healthz.
 
 ``/healthz`` only returns counters (no schedule or task ids). Everything else requires
-``SCHEDULER_API_KEY``, sent either as an ``x-api-key`` header or through the session
+``UI_API_KEY``, sent either as an ``x-api-key`` header or through the session
 cookie set by ``POST /api/login``. Without a key the UI is disabled and only
 ``/healthz`` is served.
 
 The session cookie is ``<issued_ts>.<hmac(key, issued_ts)>``: no server-side store, the
 key never leaves the server, and changing the key invalidates every session. On top of
-``SameSite=Strict``, authenticated POSTs must carry ``X-Zbsched: 1``, which a cross-site
+``SameSite=Strict``, authenticated POSTs must carry ``X-Zbtools: 1``, which a cross-site
 page cannot add without a CORS preflight (never answered).
 """
 
@@ -34,11 +34,11 @@ from .scheduler import ActionResult, Scheduler, task_unit
 StatusFn = Callable[[], tuple[bool, dict[str, Any]]]
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 
-COOKIE = "zbsched_session"
+COOKIE = "zbtools_session"
 SESSION_MAX_AGE = 7 * 24 * 3600
 LOGIN_FAILURE_DELAY = 1.0
 MAX_BODY_BYTES = 4096
-CSRF_HEADER = "X-Zbsched"
+CSRF_HEADER = "X-Zbtools"
 FONT_PATH = "/static/google-sans-code.woff2"
 OPEN_PATHS = frozenset({"/healthz", "/", "/api/login", FONT_PATH})
 
@@ -93,7 +93,7 @@ async def _auth(request: web.Request, handler: Handler) -> web.StreamResponse:
     if path == "/healthz":
         return await handler(request)
     if key is None:
-        return _error(404, "web UI disabled: set SCHEDULER_API_KEY")
+        return _error(404, "web UI disabled: set UI_API_KEY")
     if path in OPEN_PATHS:
         return await handler(request)
     if not _authenticated(request, key):
@@ -264,7 +264,7 @@ def backup_row(sched: dict[str, Any], scheduler: Scheduler) -> dict[str, Any]:
     if enabled:
         run_by = "zerobyte"
     elif sid in scheduler.table:
-        run_by = "zbsched"
+        run_by = "zbtools"
     else:
         run_by = "none"  # no cron, or excluded by the schedules file
     policy = sched.get("retentionPolicy") or {}
@@ -612,7 +612,7 @@ def build_status(scheduler: Scheduler) -> dict[str, Any]:
                 "cron": entry.cron,
                 "source": entry.source,
                 "enabled_in_zerobyte": entry.enabled_in_zerobyte,
-                "run_by": "zerobyte" if entry.enabled_in_zerobyte else "zbsched",
+                "run_by": "zerobyte" if entry.enabled_in_zerobyte else "zbtools",
                 "next_run": (
                     scheduler.next_fires[sid].isoformat() if sid in scheduler.next_fires else None
                 ),
@@ -661,11 +661,11 @@ def build_status(scheduler: Scheduler) -> dict[str, Any]:
 
 
 def load_page() -> bytes:
-    return (resources.files("zbsched") / "static" / "index.html").read_bytes()
+    return (resources.files("zbtools") / "static" / "index.html").read_bytes()
 
 
 def load_font() -> bytes:
-    return (resources.files("zbsched") / "static" / "google-sans-code.woff2").read_bytes()
+    return (resources.files("zbtools") / "static" / "google-sans-code.woff2").read_bytes()
 
 
 def make_app(settings: Settings, scheduler: Scheduler, health: StatusFn) -> web.Application:

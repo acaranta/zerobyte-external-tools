@@ -2,8 +2,9 @@ kind: template
 load: docker-build-multiarch.yaml
 data:
   dockerfiledir: Dockerfile
-  imagename: infra/zerobyte-external-scheduler
+  imagename: infra/zerobyte-external-tools
+  hubimagename: zerobyte-external-tools
   imagetag: latest
-  repotype: af
+  repotype: both
   branches: ['master']
   buildarch: linux/amd64

@@ -7,7 +7,7 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
-LOGGER_NAME = "zbsched"
+LOGGER_NAME = "zbtools"
 logger = logging.getLogger(LOGGER_NAME)
 
 _PLAIN_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:/+@,")

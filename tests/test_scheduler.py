@@ -7,9 +7,9 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from fakes import Clock, FakeZerobyte
-from zbsched.client import NotFound, ZerobyteError
-from zbsched.config import load_settings
-from zbsched.scheduler import Scheduler
+from zbtools.client import NotFound, ZerobyteError
+from zbtools.config import load_settings
+from zbtools.scheduler import Scheduler
 
 PARIS = ZoneInfo("Europe/Paris")
 # 2026-01-10 02:59:30 Paris: every "0 3 * * *" schedule fires 30 s later.
@@ -93,7 +93,7 @@ async def test_skip_when_still_queued_or_running(make, caplog):
     await s.bootstrap()
     await fire(s, clock)  # 03:00 -> a starts, b queued
     assert fake.run_calls == ["a"]
-    caplog.set_level(logging.INFO, logger="zbsched")
+    caplog.set_level(logging.INFO, logger="zbtools")
     await fire(s, clock, 60)  # 03:01 -> b due again while still queued
     assert [j.short_id for j in s.queue] == ["b"]
     assert any(getattr(r, "fields", {}).get("reason") == "already_queued" for r in caplog.records)
@@ -316,7 +316,7 @@ def events(caplog, name):
 
 
 async def test_schedule_active_in_zerobyte_is_left_to_zerobyte(make, caplog):
-    caplog.set_level(logging.INFO, logger="zbsched")
+    caplog.set_level(logging.INFO, logger="zbtools")
     s, fake, clock = make([sched("a", enabled=True, last=None), sched("b")])
     await s.bootstrap()
     assert events(caplog, "left_to_zerobyte") == ["a"]
@@ -328,7 +328,7 @@ async def test_schedule_active_in_zerobyte_is_left_to_zerobyte(make, caplog):
 
 
 async def test_handover_to_zerobyte_and_back(make, caplog):
-    caplog.set_level(logging.INFO, logger="zbsched")
+    caplog.set_level(logging.INFO, logger="zbtools")
     s, fake, clock = make([sched("a"), sched("b")])
     await s.bootstrap()
     await fire(s, clock)
@@ -349,7 +349,7 @@ async def test_handover_to_zerobyte_and_back(make, caplog):
 
 
 async def test_schedules_file_conflict_warns(make, tmp_path, caplog):
-    caplog.set_level(logging.INFO, logger="zbsched")
+    caplog.set_level(logging.INFO, logger="zbtools")
     (tmp_path / "s.yml").write_text("schedules:\n  - id: a\n    cron: '0 5 * * *'\n")
     s, _, _ = make([sched("a", enabled=True)], SCHEDULES_FILE=tmp_path / "s.yml")
     await s.bootstrap()
@@ -489,7 +489,7 @@ async def test_cancel_running_backup(make, caplog):
     assert result.ok
     assert fake.cancelled == [tid]
     assert "a" in s.running  # still watched until zerobyte reports the end
-    caplog.set_level(logging.INFO, logger="zbsched")
+    caplog.set_level(logging.INFO, logger="zbtools")
     fake.finish(tid, "cancelled")
     await fire(s, clock, 20)
     finished = [r for r in caplog.records if getattr(r, "event", None) == "finished"]
