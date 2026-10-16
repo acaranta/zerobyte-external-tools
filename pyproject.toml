@@ -2,6 +2,7 @@
 name = "zbtools"
 version = "0.1.0"
 description = "Companion tools for zerobyte: a backup scheduler with a bounded concurrency limit and a web UI to manage backups in bulk"
+license = "MIT"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
