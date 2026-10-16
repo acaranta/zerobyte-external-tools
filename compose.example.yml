@@ -13,7 +13,8 @@ services:
       POLL_INTERVAL_SECONDS: "20"
       COOLDOWN_SECONDS: "60"
       TASK_TIMEOUT_HOURS: "12"
-      # zerobyte (default) = import cron expressions from zerobyte, file = only schedules.yml
+      # zerobyte (default) = use the cron expressions set in zerobyte, with
+      # schedules.yml as optional overrides; file = only what schedules.yml lists.
       SCHEDULE_SOURCE: zerobyte
       SCHEDULES_FILE: /config/schedules.yml
       # Must be the same time zone zerobyte runs in.
@@ -22,12 +23,14 @@ services:
       # Queue, running backups and cool-downs survive restarts and upgrades.
       STATE_FILE: /state/state.json
       # Web interface on :8080 (and /healthz, which needs no key). Without
-      # UI_API_KEY (16+ characters) only /healthz is served.
+      # UI_API_KEY (16+ characters) only /healthz is served. Generate one with:
+      #   openssl rand -hex 24
       UI_API_KEY: ${UI_API_KEY:?set UI_API_KEY}
       HEALTH_BIND: 0.0.0.0
     volumes:
-      # Optional with SCHEDULE_SOURCE=zerobyte (overrides / exclusions only).
-      - ./schedules.yml:/config/schedules.yml:ro
+      # Optional YAML overrides (required with SCHEDULE_SOURCE=file). Uncomment once
+      # ./schedules.yml exists: if it is missing, Docker creates a directory instead.
+      # - ./schedules.yml:/config/schedules.yml:ro
       # Writable even with read_only: true; owned by uid 10001 in the image.
       - zbtools-state:/state
     # Reach the interface through a reverse proxy on this network (preferably over

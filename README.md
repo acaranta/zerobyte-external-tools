@@ -17,7 +17,8 @@ swap on a small host (see upstream issue
 
 This service:
 
-1. reads the schedule list from zerobyte (or a YAML file),
+1. imports the schedules (cron expressions) already set in zerobyte, so there is
+   nothing to define twice (they can be [overridden in YAML](#overriding-schedules-with-yaml-optional)),
 2. queues each backup when its cron expression comes due,
 3. starts them through the zerobyte API with **at most `MAX_CONCURRENT` (default 1)
    heavy tasks at once**, waiting for each to finish (and its `forget`, plus a
@@ -54,6 +55,95 @@ restic or the repositories.
 - The schedule list is refreshed every `SCHEDULE_REFRESH_SECONDS`, so schedules added,
   removed or edited in zerobyte are picked up without a restart.
 
+## Schedules
+
+### Imported from zerobyte (default)
+
+You keep defining schedules where you already do: in zerobyte, on each backup. This
+service reads them through the API (`GET /api/v1/backups`) and uses each backup's own
+cron expression. There is no schedule list to write or keep in sync here.
+
+- Every backup with a cron expression gets a row in the schedule table. A backup
+  without one (*Manual only* in zerobyte) is ignored; an invalid expression is
+  logged (`event=schedule_invalid`) and that backup is skipped.
+- The toggle in zerobyte decides who runs each one (see
+  [How it works](#how-it-works)): **Paused** → this service runs it on its cron,
+  **Active** → zerobyte runs it. Right after installation every schedule is usually
+  Active, so this service runs nothing until you hand some over (below).
+- The list is reloaded every `SCHEDULE_REFRESH_SECONDS` (default 5 minutes), or at once
+  with **Refresh schedules** in the web interface. A cron changed, a backup added or
+  removed in zerobyte shows up as `event=schedule_changed`, `schedule_added` or
+  `schedule_removed`.
+- Cron times are computed in `TZ`, which must be zerobyte's time zone, so a backup
+  set to 03:00 in zerobyte still runs at 03:00 here. On the night clocks go back, a
+  wall-clock time that happens twice (for example 02:30) runs only once, like classic
+  cron.
+
+### Handing schedules to this service
+
+Pause zerobyte's own scheduling for each backup this service should run: from the
+[Backups](#backups-pane) pane (select them, then **Pause**), or in the zerobyte UI by
+switching the schedule's toggle from **Enabled** to **Paused**. The cron expression
+stays stored in zerobyte, and this service keeps using it.
+
+Then check that everything is in order without starting anything:
+
+```sh
+docker compose run --rm zerobyte-external-tools --check
+```
+
+```
+SHORT_ID  NAME    CRON        SOURCE    NEXT_RUN               RUN_BY
+abc123    Photos  0 3 * * *   zerobyte  2026-10-08 03:00 CEST  zbtools
+def456    Docs    30 1 * * *  zerobyte  -                      zerobyte
+```
+
+`RUN_BY zerobyte` schedules are active in zerobyte: this service never queues them on
+cron (`--once all` skips them too, `--once <id>` still runs them on request).
+
+> When upgrading zerobyte, check again that a manual run still works on a disabled
+> schedule (`validateBackupExecution()` only skips disabled schedules for non-manual
+> runs in v0.43.1). This service depends on that behaviour.
+
+### Overriding schedules with YAML (optional)
+
+You *can* also override scheduling with a YAML file (`SCHEDULES_FILE`, default
+`/config/schedules.yml`): to give a backup a different time here than the one stored
+in zerobyte, to keep one away from this service, or to run only a chosen list.
+Without the file, everything above applies unchanged.
+
+See [config/schedules.example.yml](config/schedules.example.yml):
+
+```yaml
+schedules:
+  - id: abc123            # shortId (visible in the zerobyte URL)...
+    cron: "0 3 * * *"     # ...run at 03:00 instead of zerobyte's expression
+  - name: "Photos"        # ...or the exact schedule name
+    cron: "30 1 * * *"
+  - id: def456
+    enabled: false        # never run this schedule from here
+```
+
+- With the default `SCHEDULE_SOURCE=zerobyte`, every zerobyte schedule is still
+  imported; the file only changes the cron of the entries it lists (shown as
+  `SOURCE file` by `--check`) or excludes them (`enabled: false`).
+- With `SCHEDULE_SOURCE=file`, **only** the schedules listed in the file are run, and
+  each needs a `cron`. The file is then required.
+- The zerobyte toggle still wins: a schedule listed in the file but Active in zerobyte
+  is left to zerobyte with a warning (`event=schedule_file_conflict`).
+- Cron expressions take 5 fields, or 6 with **seconds first** (as in zerobyte). At
+  startup, an unknown id or name, an ambiguous name or an invalid cron expression
+  stops the service with a clear error. During a periodic refresh, the same problems
+  are logged and the previous schedule table is kept. The file is reloaded with the
+  schedule list, so edits need no restart.
+
+With Docker Compose, copy the example and uncomment the `schedules.yml` mount in
+[compose.example.yml](compose.example.yml):
+
+```sh
+cp config/schedules.example.yml schedules.yml
+```
+
 ## Configuration
 
 All configuration is through environment variables.
@@ -69,8 +159,8 @@ All configuration is through environment variables.
 | `TASK_TIMEOUT_HOURS` | `12` | stop waiting for a task after this long, and free its slot |
 | `CANCEL_ON_TIMEOUT` | `false` | also ask zerobyte to cancel a task that timed out |
 | `HEAVY_TASK_KINDS` | `backup,forget` | task kinds that take a slot |
-| `SCHEDULE_SOURCE` | `zerobyte` | `zerobyte`: import cron expressions from zerobyte, with `SCHEDULES_FILE` as optional overrides. `file`: only the schedules listed in `SCHEDULES_FILE` |
-| `SCHEDULES_FILE` | `/config/schedules.yml` | YAML schedules / overrides file |
+| `SCHEDULE_SOURCE` | `zerobyte` | `zerobyte`: import cron expressions from zerobyte, with `SCHEDULES_FILE` as optional overrides. `file`: only the schedules listed in `SCHEDULES_FILE` (see [Schedules](#schedules)) |
+| `SCHEDULES_FILE` | `/config/schedules.yml` | optional YAML [overrides](#overriding-schedules-with-yaml-optional); ignored if missing, unless `SCHEDULE_SOURCE=file` |
 | `SCHEDULE_REFRESH_SECONDS` | `300` | how often the schedule list and file are reloaded |
 | `CATCH_UP` | `true` | at startup, queue once every schedule that missed its last run |
 | `STATE_FILE` | *unset* | JSON file keeping the queue, running backups and cool-downs across restarts (e.g. `/state/state.json`); see [Restarts and state](#restarts-and-state) |
@@ -82,29 +172,6 @@ All configuration is through environment variables.
 | `UI_API_KEY_FILE` | | alternative: file holding that key (e.g. a mounted Docker secret) |
 | `TZ` | `Europe/Paris` | time zone for cron expressions; **must match zerobyte's** |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-
-### Schedules file
-
-See [config/schedules.example.yml](config/schedules.example.yml):
-
-```yaml
-schedules:
-  - id: abc123            # shortId (visible in the zerobyte URL)...
-    cron: "0 3 * * *"     # ...run at 03:00 instead of zerobyte's expression
-  - name: "Photos"        # ...or the exact schedule name
-    cron: "30 1 * * *"
-  - id: def456
-    enabled: false        # never run this schedule from here
-```
-
-Cron expressions take 5 fields, or 6 with **seconds first** (as in zerobyte). At
-startup, an unknown id or name, an ambiguous name or an invalid cron expression stops
-the service with a clear error. During a periodic refresh, the same problems are logged
-and the previous schedule table is kept.
-
-**Time zone and DST:** cron times are computed in `TZ`. On the night clocks go back, a
-wall-clock time that happens twice (for example 02:30) runs only once, like classic
-cron.
 
 ## Restarts and state
 
@@ -142,34 +209,6 @@ scheduler starts from what zerobyte reports. A failing save is logged once, retr
 every loop, and shown as `state_ok: false` in `/healthz`. `--once` and `--check` never
 read or write the file. Do not share one state file between two instances.
 
-## Handing schedules to this service
-
-Pause zerobyte's own scheduling for each backup this service should run: from the
-[Backups](#backups-pane) pane (select them, then **Pause**), or in the zerobyte UI by
-switching the schedule's toggle from **Enabled** to **Paused**. The cron expression
-stays stored, so `SCHEDULE_SOURCE=zerobyte` keeps using it.
-
-Then check that everything is in order without starting anything:
-
-```sh
-docker compose run --rm zerobyte-external-tools --check
-```
-
-```
-SHORT_ID  NAME    CRON        SOURCE    NEXT_RUN               RUN_BY
-abc123    Photos  0 3 * * *   zerobyte  2026-10-08 03:00 CEST  zbtools
-def456    Docs    30 1 * * *  zerobyte  -                      zerobyte
-```
-
-`RUN_BY zerobyte` schedules are active in zerobyte: this service never queues them on
-cron (`--once all` skips them too, `--once <id>` still runs them on request). A
-schedule listed in `SCHEDULES_FILE` but active in zerobyte is left to zerobyte with a
-warning (`event=schedule_file_conflict`).
-
-> When upgrading zerobyte, check again that a manual run still works on a disabled
-> schedule (`validateBackupExecution()` only skips disabled schedules for non-manual
-> runs in v0.43.1). This service depends on that behaviour.
-
 ## Running
 
 ### Docker Compose
@@ -182,7 +221,6 @@ from Docker Hub and reads the zerobyte API key and the web interface key from th
 ```sh
 printf 'ZEROBYTE_API_KEY=zb_xxx\nUI_API_KEY=%s\n' "$(openssl rand -hex 24)" > .env
 chmod 600 .env
-cp config/schedules.example.yml schedules.yml   # optional with SCHEDULE_SOURCE=zerobyte
 docker compose -f compose.example.yml up -d
 ```
 
